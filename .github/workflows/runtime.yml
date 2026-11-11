@@ -16,6 +16,10 @@ on:
         description: Publish as a GitHub release (runtime-<version> and runtime-latest)
         type: boolean
         default: false
+      steam_software_ui:
+        description: Boot test only - start Steam with its software-rendered UI and watch it for 30 more minutes
+        type: boolean
+        default: false
       boot_test:
         description: Run the boot test (adds ~1-3 hours)
         type: boolean
@@ -62,8 +66,11 @@ jobs:
         continue-on-error: true
         timeout-minutes: 240
         run: |
+          EXTRA=""
+          if [ "${{ inputs.steam_software_ui }}" = "true" ]; then EXTRA="--steam-software-ui --steam-observe 1800"; fi
+          # shellcheck disable=SC2086
           python3 tools/ideck_host.py --core build/core/libideck_core.so --runtime out \
-            --report out/boot-test --memory 4096 --cpus 4
+            --report out/boot-test --memory 4096 --cpus 4 $EXTRA
       - name: Report boot test outcome
         if: steps.boot.outcome == 'failure'
         run: |

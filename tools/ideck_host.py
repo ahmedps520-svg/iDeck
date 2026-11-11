@@ -164,6 +164,10 @@ def main() -> int:
     ap.add_argument("--timeout-boot", type=int, default=1800)
     ap.add_argument("--timeout-provision", type=int, default=5400)
     ap.add_argument("--steam-wait", type=int, default=3600)
+    ap.add_argument("--steam-software-ui", action="store_true",
+                    help="start Steam with -cef-disable-gpu -cef-disable-gpu-compositing (the app's Software-rendered Steam UI)")
+    ap.add_argument("--steam-observe", type=int, default=0,
+                    help="keep taking screenshots this many seconds after the first Steam window")
     ap.add_argument("--skip-bench", action="store_true")
     a = ap.parse_args()
 
@@ -232,6 +236,10 @@ def main() -> int:
                 break
             agent.wait_event("__none__", 30)
         log("provision", prov, ok=prov.get("state") == "done")
+        if a.steam_software_ui:
+            # Same path as the app: write the launch options, restart Steam.
+            agent.request("steam.configure", {"cef_software": True})
+            log("steam-software-ui", agent.request("steam.restart", timeout=120))
         log("steam-status", agent.request("steam.status"))
 
         if not a.skip_bench:
@@ -264,7 +272,8 @@ def main() -> int:
             if size > 20000 and window_seen_at is None:
                 window_seen_at = shot
                 report["steam_window_seconds"] = round(time.time() - t0, 1)
-            elif window_seen_at is not None:
+                deadline = min(deadline, time.time() + max(a.steam_observe, 1))
+            elif window_seen_at is not None and a.steam_observe <= 0:
                 break
             time.sleep(120)
         report["steam_window_seen"] = window_seen_at is not None

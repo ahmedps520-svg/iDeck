@@ -37,8 +37,11 @@ struct SettingsView: View {
             }
             Section("Steam") {
                 Toggle("Start in Big Picture mode", isOn: $model.settings.steamBigPicture)
+                    .onChange(of: model.settings.steamBigPicture) { _ in applySteam() }
                 Toggle("Steam beta client", isOn: $model.settings.steamBeta)
+                    .onChange(of: model.settings.steamBeta) { _ in applySteam() }
                 Toggle("Software-rendered Steam UI (compatibility)", isOn: $model.settings.steamSoftwareUI)
+                    .onChange(of: model.settings.steamSoftwareUI) { _ in applySteam() }
                 Toggle("FPS overlay in games (MangoHud)", isOn: $model.settings.showPerformanceOverlay)
             }
             Section("Audio & feedback") {
@@ -72,9 +75,15 @@ struct SettingsView: View {
                 ShareLink(item: Paths.qemuLog) { Label("Share QEMU log", systemImage: "doc.text") }
                 ShareLink(item: Paths.consoleLog) { Label("Share Linux console log", systemImage: "terminal") }
             }
-            Text("Changes apply the next time Linux starts.").font(.caption).foregroundStyle(Theme.textTertiary)
+            Text("Steam options apply right away (Steam restarts). Other changes apply the next time Linux starts.").font(.caption).foregroundStyle(Theme.textTertiary)
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("Settings")
+    }
+
+    /// Steam options take effect right away while Linux runs (Steam is
+    /// restarted); the setting is saved by AppModel before this runs.
+    private func applySteam() {
+        Task { await runtime.applySteamSettings() }
     }
 }

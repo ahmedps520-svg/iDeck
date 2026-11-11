@@ -565,14 +565,34 @@ final class RuntimeController: ObservableObject {
 
     private func afterGuestReady() async {
         guard let agent else { return }
-        let s = settings
         _ = try? await agent.request("time.sync", ["unix_ms": Int64(Date().timeIntervalSince1970 * 1000)])
-        _ = try? await agent.request("steam.configure", ["bigpicture": s.steamBigPicture, "beta": s.steamBeta,
-                                                         "cef_software": s.steamSoftwareUI,
-                                                         "overlay": s.showPerformanceOverlay])
+        await applySteamSettings()
         if let st = try? await agent.requestDict("steam.status"), (st["service"] as? String) != "active" {
             _ = try? await agent.request("steam.start", timeout: 60)
         }
+    }
+
+    /// The launch options Steam last started with, as sent by this app.
+    private static let appliedSteamOptionsKey = "ideck.steamOptionsApplied"
+
+    /// Writes Steam's launch options in Linux and restarts Steam when they
+    /// differ from what it started with. Steam is started during boot,
+    /// before the app is connected, so on device the Software-rendered UI
+    /// switch only took effect on the boot after the one it was set in.
+    func applySteamSettings() async {
+        guard let agent else { return }
+        let s = settings
+        let options: [String: Any] = ["bigpicture": s.steamBigPicture, "beta": s.steamBeta,
+                                      "cef_software": s.steamSoftwareUI, "overlay": s.showPerformanceOverlay]
+        let signature = "bigpicture=\(s.steamBigPicture) beta=\(s.steamBeta) cef_software=\(s.steamSoftwareUI)"
+        guard (try? await agent.request("steam.configure", options)) != nil else { return }
+        let applied = UserDefaults.standard.string(forKey: RuntimeController.appliedSteamOptionsKey)
+        guard applied != signature else { return }
+        if let st = try? await agent.requestDict("steam.status"), (st["service"] as? String) == "active" {
+            DiagLog.write("steam: options changed (\(signature)); restarting Steam")
+            _ = try? await agent.request("steam.restart", timeout: 60)
+        }
+        UserDefaults.standard.set(signature, forKey: RuntimeController.appliedSteamOptionsKey)
     }
 
     private func didReturnToForeground() async {
