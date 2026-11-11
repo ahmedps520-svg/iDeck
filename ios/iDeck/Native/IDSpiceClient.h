@@ -39,6 +39,12 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 
 - (void)attachToView:(MTKView *)view NS_SWIFT_NAME(attach(to:));
 - (void)detachFromView;
+/// Detaches only if `view` is the one currently attached. A view controller
+/// that is being torn down after its replacement attached must not take the
+/// display away from the new view (the iPad then stays black).
+- (void)detachFromView:(MTKView *)view NS_SWIFT_NAME(detach(from:));
+/// Recomputes the aspect-fit scale for the current drawable size.
+- (void)updateViewport;
 /// Asks the guest (spice-vdagent) to change resolution.
 - (void)requestResolution:(CGSize)size NS_SWIFT_NAME(requestResolution(_:));
 

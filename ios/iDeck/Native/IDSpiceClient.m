@@ -70,6 +70,11 @@
     [self updateViewport];
 }
 
+- (void)detachFromView:(MTKView *)view {
+    if (self.view != view) return;
+    [self detachFromView];
+}
+
 - (void)detachFromView {
     if (self.renderer && self.display) [self.display removeRenderer:self.renderer];
     if (self.view) self.view.delegate = nil;

@@ -18,7 +18,7 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_SESSION_TYPE=x11
-ExecStart=/usr/bin/xinit /usr/lib/ideck/session -- :0 vt1 -nolisten tcp -keeptty -novtswitch -nocursor
+ExecStart=/usr/bin/xinit /usr/lib/ideck/session -- :0 vt1 -nolisten tcp -keeptty -novtswitch
 Restart=always
 RestartSec=2
 

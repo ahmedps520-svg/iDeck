@@ -204,6 +204,14 @@ final class DisplayViewController: UIViewController, UIKeyInput {
         view = mtkView
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // Re-attach in case another controller held the display meanwhile.
+        spice.attach(to: mtkView)
+        spice.updateViewport()
+        becomeFirstResponder()  // hardware keyboard events
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         spice.attach(to: mtkView)
@@ -231,7 +239,16 @@ final class DisplayViewController: UIViewController, UIKeyInput {
 
     deinit {
         if let mouseObserver { NotificationCenter.default.removeObserver(mouseObserver) }
-        spice.detachFromView()
+        // Only our own view: SwiftUI may build the replacement controller
+        // (which attaches its view) before this one goes away.
+        spice.detach(from: mtkView)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // The drawable size is only known after layout; without this a newly
+        // attached view kept the renderer's default 1:1 scale.
+        spice.updateViewport()
     }
 
     // Pointer lock for games when the user captures the mouse.
@@ -253,10 +270,6 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     }
 
     override var canBecomeFirstResponder: Bool { true }
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        becomeFirstResponder()  // hardware keyboard events
-    }
 
     /// Maps a point in the view to guest framebuffer pixels (aspect fit).
     private func guestPoint(_ p: CGPoint) -> CGPoint {

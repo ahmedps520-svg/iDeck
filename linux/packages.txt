@@ -115,3 +115,7 @@ libxi6
 zenity
 xdg-utils
 file
+# Tools the Steam client shells out to ("lsof: not found" every few
+# seconds and "lspci: not found" in the device log, runtime 0.1.4).
+lsof
+pciutils

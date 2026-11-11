@@ -7,6 +7,9 @@ xset s off -dpms s noblank 2>/dev/null || true
 # Let services running as this user (Steam) connect without a cookie file.
 xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 || true
 xsetroot -solid '#0b0b0d' 2>/dev/null || true
+# A normal arrow instead of X's default cross. The pointer is shown (Xorg
+# used to run with -nocursor, which left the screen looking empty).
+xsetroot -cursor_name left_ptr 2>/dev/null || true
 
 # Follows the iPad view size and syncs the clipboard (SPICE vdagent).
 if command -v spice-vdagent >/dev/null; then

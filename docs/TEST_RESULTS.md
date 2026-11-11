@@ -201,6 +201,34 @@ Build 18 on the device, from `qemu.log` with SPICE debug on:
 
 Build 19 saves the Steam, X session and provisioning journals from Linux (`linux-*.log`) for Share logs, and logs Steam's service state.
 
+### Device run, build 19 with runtime 0.1.4: the Steam client runs on the iPad
+
+From `linux-steam.log`, `ideck.log` and `display.png`:
+
+**Startup**
+- Linux took 9 s to the agent. Provisioning took the cached fast path: setup `done`, with graphics and self-test as `warning` (Vulkan llvmpipe only; OpenGL `virgl`, 2.1).
+- `steamrtarm64/steam` started 15 s after boot. Its updater checked `steam_client_linuxarm64`: "installed version 1792618285 … Nothing to do". Verification skipped.
+- The client reached its UI start: `steamsysinfo` GPU topology (llvmpipe, since Venus is off) and `steamwebhelper` launch. `ideck.log`: `steam: service active, 9 Steam processes`.
+- Guest CPU dropped to 0–5% within a minute.
+
+**Problems**
+- `steam-runtime-launcher-service: not found`, `steamrtarm32/gldriverquery: not found` and `lspci: not found` once, then `lsof: not found` every few seconds.
+- An assert minidump was uploaded by the client, and Valve's server discarded it.
+- `display.png`, the frame CocoaSpice received:
+  - It shows the desktop with several unpainted light-grey windows stacked at the lower right: Steam's windows, opened but not drawn by `steamwebhelper` (CEF).
+  - The PNG is lighter than the real screen: CIImage treats the texture as linear, so the `#0b0b0d` background comes out about `#3c3b40`.
+
+  ![Frame received from Linux on the iPad](images/device-build19-display.png)
+
+- The app's view went black although frames had arrived. `IDSpiceClient` keeps one attached view, and `DisplayViewController.deinit` called `detachFromView()` unconditionally. A controller that SwiftUI tore down after its replacement had attached took the display away from the new view. A re-attached view also kept the renderer's 1:1 scale (`scale 1.000` in the log) until the display size next changed.
+
+| Finding | Fix |
+|---|---|
+| Old view controller detached the new view | `detach(from:)` only detaches the given view; the view re-attaches in `viewDidAppear`; viewport is recomputed after layout (build 20) |
+| No pointer | Xorg no longer runs with `-nocursor`; `xsetroot -cursor_name left_ptr` (runtime 0.1.5) |
+| `lsof` / `lspci` missing | `lsof` and `pciutils` added to the image (runtime 0.1.5) |
+| Steam windows unpainted | not fixed yet; next test is Settings › Software-rendered Steam UI (`-cef-disable-gpu -cef-disable-gpu-compositing`) |
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |
