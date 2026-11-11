@@ -11,7 +11,11 @@ namespace {
 constexpr uint64_t kAppUiMb = 220;        // SwiftUI, artwork caches, CocoaSpice
 constexpr uint64_t kQemuBaseMb = 180;     // QEMU heap, device models, SPICE
 constexpr uint64_t kPerCpuMb = 24;        // per-vCPU thread stacks + TCG state
-constexpr uint64_t kSafetyMarginMb = 512; // headroom against jetsam spikes
+// Headroom against jetsam spikes. Guest RAM is touched lazily and the
+// pressure policy (balloon, cache drops) reacts before the limit, so 384 MiB
+// is enough; on a 12 GB M5 with a measured 5120 MiB limit this yields a
+// 3 GiB guest instead of 2 GiB (too small for Steam).
+constexpr uint64_t kSafetyMarginMb = 384;
 
 uint64_t tb_cache_for(uint64_t guest_mb) {
     // QEMU's default code buffer on 64-bit hosts is 1 GiB. Under JIT the
@@ -26,7 +30,7 @@ uint64_t gpu_budget_for(uint64_t guest_mb, bool vulkan) {
     // Venus allocations (textures, buffers, pipelines) live in host Metal
     // memory and count toward the app footprint. Games at 720p typically
     // need 0.75-1.5 GiB of GPU memory.
-    return guest_mb >= 4096 ? 1536 : 1024;
+    return guest_mb >= 4096 ? 1536 : 768;
 }
 
 }  // namespace

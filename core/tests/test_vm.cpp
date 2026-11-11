@@ -68,6 +68,9 @@ TEST("qemu: iOS profile builds the expected device set") {
     CHECK(has_pair(a, "-drive", "file=/data/data.img"));
     CHECK(has_pair(a, "-audiodev", "spice"));
     CHECK(has_pair(a, "-device", "name=com.redhat.spice.0"));
+    // Regression (first device run): utmapp/qemu 10.0.12 rejects this
+    // property on virtio-gpu-gl-pci and QEMU exits immediately.
+    CHECK(!has_pair(a, "-device", "refresh_rate"));
     CHECK(!has_pair(a, "-display", "none"));
 }
 

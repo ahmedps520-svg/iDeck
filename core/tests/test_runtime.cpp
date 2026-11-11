@@ -152,6 +152,19 @@ TEST("memory: 12 GB iPad with a 6 GB limit gets 3 GiB") {
     CHECK(p.guest_mb + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 6144u);
 }
 
+TEST("memory: measured M5 limit (5120 MiB) gives a 3 GiB guest") {
+    // From the first device run: iPad17,2, iPadOS 27.2, 5110 MiB available
+    // at launch with a 9 MiB footprint.
+    MemoryInputs in;
+    in.physical_mb = 12288;
+    in.app_limit_mb = 5120;
+    in.cpus = 4;
+    MemoryPlan p = plan_memory(in);
+    CHECK(p.fits);
+    CHECK_EQ(p.guest_mb, 3072u);
+    CHECK(p.guest_mb + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 5120u);
+}
+
 TEST("memory: larger limits unlock larger tiers; entitlement gates >4 GiB") {
     MemoryInputs in;
     in.physical_mb = 12288;

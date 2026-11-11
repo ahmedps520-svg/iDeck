@@ -137,8 +137,9 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
         if (c.vulkan) {
             gpu += ",blob=true,venus=true,hostmem=" + std::to_string(c.hostmem_mb) + "M";
         }
-        // utmapp/qemu extension: guest-visible refresh rate in mHz.
-        gpu += ",refresh_rate=" + std::to_string(c.refresh_hz * 1000);
+        // No refresh_rate: the utmapp/qemu 10.0.12 virtio-gpu-gl-pci device
+        // rejects it ("Property ... not found", seen on device); the guest
+        // display defaults to 60 Hz.
         add({"-device", gpu});
     } else {
         add({"-device", "virtio-gpu-pci,id=gpu0,xres=" + std::to_string(c.width) +
