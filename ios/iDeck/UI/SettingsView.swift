@@ -30,6 +30,10 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("Vulkan (Venus)", isOn: $model.settings.vulkan)
+                    .disabled(model.settings.safeGraphics)
+                Toggle("Safe graphics (no GPU acceleration)", isOn: $model.settings.safeGraphics)
+                Text("Troubleshooting: boots Linux with software rendering. Very slow, but tells whether a crash comes from the GPU path.")
+                    .font(.caption).foregroundStyle(Theme.textTertiary)
             }
             Section("Steam") {
                 Toggle("Start in Big Picture mode", isOn: $model.settings.steamBigPicture)

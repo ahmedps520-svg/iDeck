@@ -35,6 +35,9 @@ struct Settings: Codable, Equatable {
     var guestMemoryMb: UInt64 = 0          // 0 = automatic
     var cpuModel = "neoverse-n1"
     var vulkan = true
+    /// Diagnostic: boot without GPU acceleration (plain virtio-gpu, SPICE 2D,
+    /// software rendering in Linux). Slow, but isolates GPU-path crashes.
+    var safeGraphics = false
     var fileBackedRAM = false              // experimental: guest RAM in a file
     var steamBigPicture = false
     var steamBeta = false
@@ -46,9 +49,18 @@ struct Settings: Codable, Equatable {
     var showPerformanceOverlay = false
     var externalLibraryBookmark: Data?
 
+    /// Saved values merged over defaults, so a settings file written by an
+    /// older build (missing newer keys) keeps the user's choices.
     static func load() -> Settings {
         guard let data = try? Data(contentsOf: Paths.settingsFile),
-              let s = try? JSONDecoder().decode(Settings.self, from: data) else { return Settings() }
+              let saved = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let defaultsData = try? JSONEncoder().encode(Settings()),
+              var merged = try? JSONSerialization.jsonObject(with: defaultsData) as? [String: Any] else {
+            return Settings()
+        }
+        merged.merge(saved) { _, new in new }
+        guard let mergedData = try? JSONSerialization.data(withJSONObject: merged),
+              let s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
         return s
     }
 

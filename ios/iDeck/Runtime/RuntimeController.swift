@@ -246,7 +246,9 @@ final class RuntimeController: ObservableObject {
                            refreshHz: s.refreshHz, spiceSocket: Paths.spiceSocket.path,
                            qmpSocket: Paths.qmpSocket.path, controlSocket: Paths.controlSocket.path,
                            inputSocket: Paths.inputSocket.path, consoleLog: Paths.consoleLog.path)
-        cfg.vulkan = s.vulkan
+        cfg.vulkan = s.vulkan && !s.safeGraphics
+        cfg.gl = !s.safeGraphics
+        if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
         cfg.audio = s.audio ? "hda" : "none"
         cfg.splitWx = RuntimeController.edition == "jit"
         if s.fileBackedRAM { cfg.ramFile = Paths.guestRAMFile.path }

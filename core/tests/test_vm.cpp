@@ -66,6 +66,9 @@ TEST("qemu: iOS profile builds the expected device set") {
     CHECK(has_pair(a, "-mon", "chardev=qmp0,mode=control"));
     CHECK(has_pair(a, "-device", "virtio-balloon-pci"));
     CHECK(has_pair(a, "-drive", "file=/data/data.img"));
+    // Discard fails on device for every request; not offered on iOS.
+    CHECK(has_pair(a, "-drive", "discard=ignore"));
+    CHECK(!has_pair(a, "-drive", "discard=unmap"));
     CHECK(has_pair(a, "-audiodev", "spice"));
     CHECK(has_pair(a, "-device", "name=com.redhat.spice.0"));
     // Regression (first device run): utmapp/qemu 10.0.12 rejects this

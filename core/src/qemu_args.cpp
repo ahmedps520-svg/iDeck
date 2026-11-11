@@ -112,12 +112,14 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
     add({"-rtc", "base=utc,clock=host"});
     add({"-device", "virtio-rng-pci"});
 
-    // Disks: raw images, sparse on APFS. Discard keeps the host file sparse
-    // when the guest frees blocks (fstrim / discard mount option).
+    // Disks: raw images, created sparse. On the iPad, discard fails for
+    // every request ("I/O error, dev vdb ... op 0x3:(DISCARD)" during mkfs
+    // on device), so it is not offered to the guest there; the desktop test
+    // profile keeps it to keep CI images sparse.
+    const std::string discard = ios ? "discard=ignore,detect-zeroes=off" : "discard=unmap,detect-zeroes=unmap";
     auto disk = [&](const std::string& id, const std::string& path, const std::string& serial) {
         add({"-drive", "if=none,id=" + id + ",file=" + qopt(path) +
-                           ",format=raw,cache=writeback,aio=threads,discard=unmap,detect-zeroes=unmap,"
-                           "file.locking=off"});
+                           ",format=raw,cache=writeback,aio=threads," + discard + ",file.locking=off"});
         add({"-device", "virtio-blk-pci,drive=" + id + ",serial=" + serial});
     };
     disk("sys", c.system_disk, "ideck-system");

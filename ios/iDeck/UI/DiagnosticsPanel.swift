@@ -4,6 +4,7 @@ import SwiftUI
 /// log tails, and one-tap log sharing. Shown during setup and on Runtime.
 struct DiagnosticsPanel: View {
     @EnvironmentObject var runtime: RuntimeController
+    @EnvironmentObject var model: AppModel
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @State private var now = Date()
 
@@ -30,6 +31,9 @@ struct DiagnosticsPanel: View {
                     row("Signing", "\(IDPlatform.signingKind) · app group \(IDPlatform.applicationGroupIdentifier ?? "none")")
                 }
                 .font(.caption.monospaced())
+                Toggle("Safe graphics for the next start (no GPU acceleration)", isOn: $model.settings.safeGraphics)
+                    .font(.caption)
+                    .tint(Theme.warning)
                 logBox("Linux console", runtime.consoleTail, empty: "No output yet. The kernel has not printed anything.")
                 logBox("QEMU", runtime.qemuLogTail, empty: "No QEMU messages.")
                 Text("Logs are also in the Files app: On My iPad › iDeck › Logs.")
