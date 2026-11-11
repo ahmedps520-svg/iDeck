@@ -249,9 +249,10 @@ Steam was started with `-cef-disable-gpu -cef-disable-gpu-compositing`
 - The client logged `Failed creating offscreen shared JS context`, wrote assert dumps, and exited with SIGBUS three times. systemd then stopped retrying.
 - Every screenshot was blank (4319-byte PNGs).
 
-The same mode shows a working Steam window on the iPad (build 21, above), and
-the CI GPU-mode test painted the client (0.1.4). So this failure belongs to
-the CI VM (no virgl, llvmpipe only). It is not evidence about the device.
+The same mode shows a working Steam window on the iPad (build 21, above). In
+the CI VM (no virgl, llvmpipe only) the Steam UI has never loaded in any mode:
+the GPU-mode tests (0.1.4, 0.1.8) only reach Steam's own "Steamwebhelper is
+not responding" dialog. This result says nothing about the device.
 
 ### Vulkan without app groups (build 24, CI only)
 
@@ -282,6 +283,13 @@ Evidence so far:
 - `UIDeviceFamily` [1, 2] (iPhone and iPad); all 34 needed frameworks are embedded.
 - The app binary contains the fallback's strings (`ideck-selftest/%x`, `ideck-metal/%x`) and imports `_dyld_register_func_for_add_image`.
 - The three frameworks still import `_shm_open` through `__DATA_CONST,__got`.
+
+### Linux runtime 0.1.8 boot test (run 43109484177): published; Steam UI as in 0.1.4
+
+- Boot 32.3 s. Provisioning ran and the runtime was published as `runtime-0.1.8` (system.img.xz 329,766,164 bytes).
+- Steam started with the Lightweight flags: `-noverifyfiles -nofriendsui -nochatui -no-cef-sandbox`.
+- At 676 s the first non-blank screen showed Steam's "Steamwebhelper is not responding" dialog. It is byte-identical to the 0.1.4 screenshot, so the CI result has neither improved nor regressed. The UI still does not load in the CI VM.
+- zram swap is not created here: the CI guest has 4 GiB, above the 3.5 GiB threshold.
 
 ### iOS app builds (`ios.yml`)
 
