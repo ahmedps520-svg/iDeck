@@ -191,6 +191,16 @@ QEMU 8.2 TCG on `ubuntu-24.04-arm`, no GPU and no sound device.
   - `display.png`, the last frame received from Linux, included in Share logs;
   - CocoaSpice and spice-gtk debug output for the first two minutes.
 
+Build 18 on the device, from `qemu.log` with SPICE debug on:
+- The GPU display path works:
+  - First scanout 640x480 (boot console). The user saw the Linux boot text on the iPad.
+  - Then Xorg switched the output to 1280x720. CocoaSpice took the new scanouts (one stale fd ignored, as designed) and kept receiving `gl draw 1280x720` updates.
+- No pointer, by design so far: `ideck-session.service` starts Xorg with `-nocursor`, and the cursor channel only ever got `set_cursor: flags 1, size 0`.
+- The desktop background is `#0b0b0d`. The black screen therefore fits Linux showing an empty desktop with no Steam window. Steam's state is not visible from the app logs.
+- Mouse mode switched to client (absolute) once the guest SPICE agent connected.
+
+Build 19 saves the Steam, X session and provisioning journals from Linux (`linux-*.log`) for Share logs, and logs Steam's service state.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

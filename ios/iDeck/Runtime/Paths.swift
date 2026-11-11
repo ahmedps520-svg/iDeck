@@ -65,9 +65,14 @@ enum Paths {
     static var crashLog: URL { logs.appendingPathComponent("crash.log") }
     /// The last frame the display client received from Linux.
     static var displaySnapshot: URL { logs.appendingPathComponent("display.png") }
+    /// Journals fetched from Linux through the guest agent.
+    static var guestSteamLog: URL { logs.appendingPathComponent("linux-steam.log") }
+    static var guestSessionLog: URL { logs.appendingPathComponent("linux-session.log") }
+    static var guestProvisionLog: URL { logs.appendingPathComponent("linux-provision.log") }
     /// Every log worth sending when something went wrong.
     static var allLogs: [URL] {
-        [appLog, previousAppLog, crashLog, qemuLog, consoleLog, displaySnapshot].filter { fm.fileExists(atPath: $0.path) }
+        [appLog, previousAppLog, crashLog, qemuLog, consoleLog, displaySnapshot,
+         guestSteamLog, guestSessionLog, guestProvisionLog].filter { fm.fileExists(atPath: $0.path) }
     }
 
     static var activeRuntimeVersion: String? {

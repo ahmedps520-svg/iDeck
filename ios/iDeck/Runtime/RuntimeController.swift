@@ -266,6 +266,9 @@ final class RuntimeController: ObservableObject {
         if tailTicks % 15 == 0, isRunning, let spice {
             spice.saveSnapshot(to: Paths.displaySnapshot) { _ in }
         }
+        if tailTicks % 30 == 0, case .running = phase {
+            Task { await captureGuestLogs() }
+        }
         if tailTicks % 5 == 0 && (isRunning || phase == .stopping) {
             DiagLog.write("mem: footprint \(IDPlatform.physFootprint >> 20) MiB, available \(IDPlatform.availableMemory >> 20) MiB, "
                           + "guest used \(metrics.memUsedKB >> 10)/\(metrics.memTotalKB >> 10) MiB, pressure \(memory.sample.level), "
@@ -530,6 +533,34 @@ final class RuntimeController: ObservableObject {
     private func tailOfLog() -> String {
         guard let log = try? String(contentsOf: Paths.qemuLog, encoding: .utf8), !log.isEmpty else { return "" }
         return "\n\n" + log.split(separator: "\n").suffix(8).joined(separator: "\n")
+    }
+
+    private var capturingGuestLogs = false
+    private var lastSteamState = ""
+
+    /// Saves the Steam, X session and provisioning journals from Linux next
+    /// to the app logs (Share logs includes them) and notes Steam's state in
+    /// ideck.log when it changes. Runs every minute while Linux runs.
+    func captureGuestLogs() async {
+        guard case .running = phase, let agent, !capturingGuestLogs else { return }
+        capturingGuestLogs = true
+        defer { capturingGuestLogs = false }
+        let units: [(String, Int, URL)] = [("ideck-steam.service", 400, Paths.guestSteamLog),
+                                           ("ideck-session.service", 150, Paths.guestSessionLog),
+                                           ("ideck-provision.service", 150, Paths.guestProvisionLog)]
+        for (unit, lines, url) in units {
+            guard let r = try? await agent.requestDict("logs", ["unit": unit, "lines": lines], timeout: 30),
+                  let out = r["output"] as? String else { continue }
+            try? Data(out.utf8).write(to: url, options: .atomic)
+        }
+        if let st = try? await agent.requestDict("steam.status", [:], timeout: 15) {
+            let pids = (st["pids"] as? [Any])?.count ?? 0
+            let state = "service \(st["service"] as? String ?? "?"), \(pids) Steam processes"
+            if state != lastSteamState {
+                DiagLog.write("steam: \(state)")
+                lastSteamState = state
+            }
+        }
     }
 
     private func afterGuestReady() async {

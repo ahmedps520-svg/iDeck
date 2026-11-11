@@ -51,7 +51,11 @@ struct DiagnosticsPanel: View {
             }
         }
         .onReceive(tick) { now = $0 }
-        .onAppear { runtime.refreshTails() }
+        .onAppear {
+            runtime.refreshTails()
+            // Fresh Linux journals for Share logs.
+            Task { await runtime.captureGuestLogs() }
+        }
     }
 
     /// Header line plus the first frames of the most recent crash.log entry.
