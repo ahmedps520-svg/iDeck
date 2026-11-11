@@ -160,6 +160,24 @@ Measured from `ideck.log`, `qemu.log` and `console.log` shared from the device:
 | Install restarted from scratch on every service restart | a retry keeps the packages already extracted; `ideck-steam.service` waits 20 s between restarts and stops after 4 starts in 15 min |
 | JIT request unanswered after a long gap | QEMU is not started when the debugger attached more than 45 s earlier; iDeck asks for a relaunch with JIT instead of crashing |
 
+### Linux runtime 0.1.4 boot test (run 43061237530): the Steam client starts
+
+QEMU 8.2 TCG on `ubuntu-24.04-arm`, no GPU and no sound device.
+
+**Setup and launch**
+- Boot to the agent took 34 s.
+- `install-steam`: "installed 34 packages" (client version `1792618285`, full set), with no layout error. `install-compat`: FEX RootFS mounted. Provisioning finished at 498 s.
+- `ideck-steam.service` started `steamrtarm64/steam` (native ARM64), which ran "Verifying installation…".
+- `steam_window_seen: true`, for the first time. `screen-01.png` shows the client's own native dialog:
+
+  ![Steam client dialog in the CI guest](images/ci-runtime-0.1.4-steam-client.png)
+
+**Problems seen**
+- The Steam UI did not load. `steamwebhelper` (CEF) logged `Failed creating offscreen shared JS context`, and the client showed "Steamwebhelper is not responding" with its own recovery options. Not yet separated: slowness (TCG with llvmpipe on a CI runner) versus a real CEF problem. The next things to try are the software-UI switch (`-cef-disable-gpu`) and the device's JIT speed.
+- The client then started its self-update (667,975 KB): it reported "Package file … missing or incorrect size" for its `package/*.zip.vz.*` cache, which the bootstrap does not keep. At 800 s the main process died with SIGBUS (`status=7/BUS`). The service restarted it 20 s later, and the update resumed (312,428 KB left) when the test ended.
+- The client wrote crash dumps and uploaded them to Valve's crash reporter (`CrashID=bp-…`). That is Steam's own behaviour, not iDeck's.
+- GL and Vulkan (llvmpipe) and audio (`auto_null`) failed as expected on the runner.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |
