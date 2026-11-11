@@ -28,6 +28,10 @@
 	<string>$(IDECK_MANIFEST_URL)</string>
 	<key>IDeckAppGroup</key>
 	<string>$(IDECK_APP_GROUP)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Linux games and Steam voice chat can use the microphone. iDeck only passes it to Linux while a game asks for it.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>iDeck connects to its own Linux virtual machine through local sockets.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>stikdebug</string>

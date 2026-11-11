@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import UIKit
@@ -62,6 +63,7 @@ final class RuntimeController: ObservableObject {
     static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
 
     init() {
+        IDCrashLog.install(withPath: Paths.crashLog.path)
         DiagLog.rotate()
         DiagLog.write("iDeck launch: \(IDPlatform.modelIdentifier), \(UIDevice.current.systemName) \(UIDevice.current.systemVersion), "
                       + "edition \(RuntimeController.edition), signing \(IDPlatform.signingKind), "
@@ -330,6 +332,16 @@ final class RuntimeController: ObservableObject {
         controllers.hapticsEnabled = settings.hapticsEnabled
         controllers.bind(to: input)
 
+        // SPICE plays guest audio through GStreamer/CoreAudio; set up a
+        // playback session first, as UTM does on iOS.
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+            DiagLog.write("audio session: playback active")
+        } catch {
+            DiagLog.write("audio session setup failed: \(error.localizedDescription)")
+        }
         let spice = IDSpiceClient(socketPath: Paths.spiceSocket.path)
         spice.audioEnabled = settings.audio
         self.spice = spice

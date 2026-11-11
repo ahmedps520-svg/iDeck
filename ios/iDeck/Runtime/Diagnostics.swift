@@ -26,7 +26,7 @@ enum DiagLog {
     /// Starts a new trace for this app launch (keeps the previous one).
     static func rotate() {
         let fm = FileManager.default
-        let prev = Paths.logs.appendingPathComponent("ideck.previous.log")
+        let prev = Paths.previousAppLog
         try? fm.removeItem(at: prev)
         try? fm.moveItem(at: Paths.appLog, to: prev)
     }

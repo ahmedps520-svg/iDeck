@@ -70,6 +70,9 @@ TEST("qemu: iOS profile builds the expected device set") {
     CHECK(has_pair(a, "-drive", "discard=ignore"));
     CHECK(!has_pair(a, "-drive", "discard=unmap"));
     CHECK(has_pair(a, "-audiodev", "spice"));
+    // No capture device for the guest (it made SPICE record from the mic).
+    CHECK(has_pair(a, "-device", "hda-output"));
+    CHECK(!has_pair(a, "-device", "hda-duplex"));
     CHECK(has_pair(a, "-device", "name=com.redhat.spice.0"));
     // Regression (first device run): utmapp/qemu 10.0.12 rejects this
     // property on virtio-gpu-gl-pci and QEMU exits immediately.

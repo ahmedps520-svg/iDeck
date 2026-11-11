@@ -14,12 +14,22 @@ struct DiagnosticsPanel: View {
                 HStack {
                     Label("Diagnostics", systemImage: "stethoscope").font(.headline).foregroundStyle(.white)
                     Spacer()
-                    ShareLink(items: [Paths.appLog, Paths.qemuLog, Paths.consoleLog].filter {
-                        FileManager.default.fileExists(atPath: $0.path)
-                    }) {
+                    // Includes the previous session's trace and crash.log,
+                    // which explain a session that closed.
+                    ShareLink(items: Paths.allLogs) {
                         Label("Share logs", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(SecondaryButtonStyle())
+                }
+                if let crash = lastCrash {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("LAST CRASH").font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(Theme.danger)
+                        Text(crash).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.textSecondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                if let previous = previousSessionTail {
+                    logBox("Previous session (last lines)", previous, empty: "")
                 }
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                     row("Linux", runtime.phase.traceLabel + elapsed)
@@ -42,6 +52,20 @@ struct DiagnosticsPanel: View {
         }
         .onReceive(tick) { now = $0 }
         .onAppear { runtime.refreshTails() }
+    }
+
+    /// Header line plus the first frames of the most recent crash.log entry.
+    private var lastCrash: String? {
+        let lines = DiagLog.tail(Paths.crashLog, lines: 80)
+        guard let start = lines.lastIndex(where: { $0.hasPrefix("=== iDeck") }) else { return nil }
+        return lines[start...].prefix(8).joined(separator: "\n")
+    }
+
+    /// The end of the previous session's trace (where it was when it ended).
+    private var previousSessionTail: [String]? {
+        let lines = DiagLog.tail(Paths.previousAppLog, lines: 8)
+        guard lines.count > 1 else { return nil }
+        return lines
     }
 
     private var elapsed: String {

@@ -55,6 +55,13 @@ enum Paths {
     static var qemuLog: URL { logs.appendingPathComponent("qemu.log") }
     static var consoleLog: URL { logs.appendingPathComponent("console.log") }
     static var appLog: URL { logs.appendingPathComponent("ideck.log") }
+    /// Trace of the previous app session (the one that closed, if it did).
+    static var previousAppLog: URL { logs.appendingPathComponent("ideck.previous.log") }
+    static var crashLog: URL { logs.appendingPathComponent("crash.log") }
+    /// Every log worth sending when something went wrong.
+    static var allLogs: [URL] {
+        [appLog, previousAppLog, crashLog, qemuLog, consoleLog].filter { fm.fileExists(atPath: $0.path) }
+    }
 
     static var activeRuntimeVersion: String? {
         guard let s = try? String(contentsOf: currentRuntimeFile, encoding: .utf8) else { return nil }

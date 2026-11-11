@@ -165,7 +165,10 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
         add({"-audiodev", ios ? "spice,id=audio0" : "none,id=audio0"});
         if (c.audio == "hda") {
             add({"-device", "intel-hda"});
-            add({"-device", "hda-duplex,audiodev=audio0"});
+            // Output only: with hda-duplex the guest opens a capture device,
+            // SPICE starts recording and the client touches the iPad
+            // microphone (iDeck closed ~10 s after boot on device).
+            add({"-device", "hda-output,audiodev=audio0"});
         } else {
             add({"-device", "virtio-sound-pci,audiodev=audio0"});
         }

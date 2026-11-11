@@ -3,3 +3,4 @@
 #import "IDPlatform.h"
 #import "IDQemuLauncher.h"
 #import "IDSpiceClient.h"
+#import "IDCrashLog.h"
