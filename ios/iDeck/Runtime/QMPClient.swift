@@ -18,10 +18,16 @@ final class QMPClient {
     var onEvent: ((String, [String: Any]) -> Void)?
     var onClose: (() -> Void)?
 
-    func connect(path: String) async throws {
+    /// Connects and waits for QEMU's greeting. QEMU only greets once its main
+    /// loop runs, so a QEMU stuck during initialisation surfaces here as a
+    /// timeout instead of an endless wait.
+    func connect(path: String, readyTimeout: TimeInterval = 90) async throws {
         socket.onData = { [weak self] in self?.receive($0) }
         socket.onClose = { [weak self] in self?.closed() }
         try await socket.connect(path: path, timeout: 30)
+        DispatchQueue.global().asyncAfter(deadline: .now() + readyTimeout) { [weak self] in
+            self?.failReadyWaiters("QEMU did not finish starting within \(Int(readyTimeout)) seconds (no QMP greeting).")
+        }
         try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
             lock.lock()
             if ready {
@@ -74,6 +80,14 @@ final class QMPClient {
         } else {
             c?.resume(returning: obj["return"] ?? NSNull())
         }
+    }
+
+    private func failReadyWaiters(_ message: String) {
+        lock.lock()
+        let waiters = readyWaiters
+        readyWaiters.removeAll()
+        lock.unlock()
+        waiters.forEach { $0.resume(throwing: QMPError(message: message)) }
     }
 
     private func closed() {

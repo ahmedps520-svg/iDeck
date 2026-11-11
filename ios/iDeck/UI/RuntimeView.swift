@@ -73,6 +73,7 @@ struct RuntimeView: View {
                     }
                 }
                 if let t = selfTest { SelfTestCard(report: t) }
+                DiagnosticsPanel()
             }
             .padding(28)
         }

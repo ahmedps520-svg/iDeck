@@ -46,8 +46,15 @@ enum Paths {
     static var qmpSocket: URL { run.appendingPathComponent("q.sock") }
     static var controlSocket: URL { run.appendingPathComponent("c.sock") }
     static var inputSocket: URL { run.appendingPathComponent("i.sock") }
-    static var qemuLog: URL { run.appendingPathComponent("qemu.log") }
-    static var consoleLog: URL { run.appendingPathComponent("console.log") }
+    /// Documents/Logs: visible in the Files app (On My iPad › iDeck), so logs
+    /// can be shared even when the app is stuck.
+    static var logs: URL {
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return ensure(docs.appendingPathComponent("Logs", isDirectory: true))
+    }
+    static var qemuLog: URL { logs.appendingPathComponent("qemu.log") }
+    static var consoleLog: URL { logs.appendingPathComponent("console.log") }
+    static var appLog: URL { logs.appendingPathComponent("ideck.log") }
 
     static var activeRuntimeVersion: String? {
         guard let s = try? String(contentsOf: currentRuntimeFile, encoding: .utf8) else { return nil }

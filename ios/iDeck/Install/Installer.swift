@@ -328,11 +328,14 @@ final class Installer: ObservableObject {
             await runtime.startGaming()
         }
         // Wait for the guest agent's ready event.
-        let deadline = Date().addingTimeInterval(15 * 60)
+        // In CI the same image reaches the agent in ~35 s under TCG; give the
+        // first boot on device generous headroom, then fail with the evidence.
+        let started = Date()
+        let deadline = started.addingTimeInterval(10 * 60)
         while Date() < deadline {
             switch runtime.phase {
             case .running:
-                update("boot-guest", detail: "Linux is running", progress: 1)
+                update("boot-guest", detail: "Linux is running (\(Int(Date().timeIntervalSince(started))) s)", progress: 1)
                 return
             case .failed(let m):
                 throw Core.CallError(message: m)
@@ -342,13 +345,17 @@ final class Installer: ObservableObject {
             case .needsRelaunch:
                 throw WaitForUser(message: "Close iDeck from the app switcher and open it again to continue")
             case .booting(let s), .starting(let s):
-                update("boot-guest", detail: s)
+                let elapsed = Int(Date().timeIntervalSince(started))
+                let console = runtime.consoleTail.last.map { " · \($0.prefix(90))" } ?? " · no console output yet"
+                update("boot-guest", detail: "\(s) · \(elapsed / 60):\(String(format: "%02d", elapsed % 60))\(console)")
             default:
                 break
             }
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        throw Core.CallError(message: "Linux did not finish booting within 15 minutes")
+        let lastConsole = runtime.consoleTail.suffix(6).joined(separator: "\n")
+        throw Core.CallError(message: "Linux did not finish booting within 10 minutes. Last console output:\n"
+                             + (lastConsole.isEmpty ? "(none: the guest kernel printed nothing)" : lastConsole))
     }
 
     /// Mirrors a step of the in-guest provisioning service.

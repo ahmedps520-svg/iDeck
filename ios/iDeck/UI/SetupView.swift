@@ -6,6 +6,16 @@ struct SetupView: View {
     @EnvironmentObject var runtime: RuntimeController
     @EnvironmentObject var model: AppModel
     @State private var started = false
+    @State private var showDiagnostics = false
+
+    /// Diagnostics open by themselves once Linux is starting or anything failed.
+    private var diagnosticsVisible: Bool {
+        if showDiagnostics || installer.failure != nil { return true }
+        switch runtime.phase {
+        case .starting, .booting, .failed: return true
+        default: return false
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -50,6 +60,11 @@ struct SetupView: View {
                     if case .running = runtime.phase {
                         Button("Show Linux") { model.showGame = true }.buttonStyle(SecondaryButtonStyle())
                     }
+                    Button(diagnosticsVisible ? "Hide Diagnostics" : "Diagnostics") { showDiagnostics.toggle() }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                if diagnosticsVisible {
+                    DiagnosticsPanel()
                 }
             }
             .padding(36)

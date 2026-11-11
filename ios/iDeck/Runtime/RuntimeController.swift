@@ -31,7 +31,14 @@ final class RuntimeController: ObservableObject {
         var updated = Date.distantPast
     }
 
-    @Published private(set) var phase: Phase = .stopped
+    @Published private(set) var phase: Phase = .stopped {
+        didSet { if phase != oldValue { DiagLog.write("phase: \(phase.traceLabel)") } }
+    }
+    /// Live tails for the diagnostics panel (refreshed every 2 s).
+    @Published private(set) var consoleTail: [String] = []
+    @Published private(set) var qemuLogTail: [String] = []
+    @Published private(set) var bootStartedAt: Date?
+    private var tailTimer: Timer?
     @Published private(set) var plan: MemoryPlan?
     @Published private(set) var guestInfo: [String: Any] = [:]
     @Published private(set) var metrics = GuestMetrics()
@@ -55,6 +62,12 @@ final class RuntimeController: ObservableObject {
     static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
 
     init() {
+        DiagLog.rotate()
+        DiagLog.write("iDeck launch: \(IDPlatform.modelIdentifier), \(UIDevice.current.systemName) \(UIDevice.current.systemVersion), "
+                      + "edition \(RuntimeController.edition), signing \(IDPlatform.signingKind), "
+                      + "CS_DEBUGGED \(IDPlatform.isDebuggerAttached), traced \(IDPlatform.isTraced), "
+                      + "app group \(IDPlatform.applicationGroupIdentifier ?? "none"), "
+                      + "available \(IDPlatform.availableMemory >> 20) MiB, footprint \(IDPlatform.physFootprint >> 20) MiB")
         refreshInstalledState()
         memory.apply = { [weak self] actions in await self?.applyPressure(actions) }
         memory.start()
@@ -111,9 +124,34 @@ final class RuntimeController: ObservableObject {
         do {
             try await boot(files)
         } catch {
-            phase = .failed(error.localizedDescription)
+            DiagLog.write("boot failed: \(error.localizedDescription)")
+            phase = .failed(error.localizedDescription + tailOfLog())
             lastError = error.localizedDescription
         }
+    }
+
+    private func startLogTail() {
+        tailTimer?.invalidate()
+        tailTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshTails() }
+        }
+        refreshTails()
+    }
+
+    func refreshTails() {
+        consoleTail = DiagLog.tail(Paths.consoleLog, lines: 12)
+        qemuLogTail = DiagLog.tail(Paths.qemuLog, lines: 8)
+    }
+
+    /// The guest kernel command line: the manifest's, made verbose so the
+    /// serial console shows boot progress (shown live in Diagnostics).
+    private func kernelCmdline(_ manifest: String) -> String {
+        let base = manifest.isEmpty
+            ? "root=/dev/vda rootfstype=ext4 rw console=ttyAMA0 loglevel=4 transparent_hugepage=never ideck.mode=gaming"
+            : manifest
+        let parts = base.split(separator: " ").map(String.init)
+            .filter { $0 != "quiet" && !$0.hasPrefix("systemd.show_status=") }
+        return (parts + ["systemd.show_status=true"]).joined(separator: " ")
     }
 
     private func boot(_ files: RuntimeFiles) async throws {
@@ -128,6 +166,12 @@ final class RuntimeController: ObservableObject {
         let plan = try Core.call("memory.plan", inputs, as: MemoryPlan.self)
         self.plan = plan
         warnings = plan.notes
+        DiagLog.write("boot: runtime \(files.version), JIT CS_DEBUGGED \(IDPlatform.isDebuggerAttached) traced \(IDPlatform.isTraced), "
+                      + "limit \(limitMb) MiB -> guest \(plan.guestMb) MiB, tb \(plan.tbCacheMb), hostmem \(plan.hostmemMb), "
+                      + "cpus \(s.profile.cpus), cpu \(s.cpuModel), vulkan \(s.vulkan)")
+        bootStartedAt = Date()
+        for log in [Paths.qemuLog, Paths.consoleLog] { try? FileManager.default.removeItem(at: log) }
+        startLogTail()
 
         phase = .starting("Preparing game storage")
         try StorageManager.ensureDataDisk()
@@ -140,7 +184,7 @@ final class RuntimeController: ObservableObject {
         let res = s.resolution.size
         var cfg = VMConfig(kernel: files.kernel.path, initrd: files.initrd?.path ?? "",
                            systemDisk: files.system.path, dataDisk: Paths.dataDisk.path,
-                           cmdline: files.cmdline, guestMb: plan.guestMb, cpus: s.profile.cpus,
+                           cmdline: kernelCmdline(files.cmdline), guestMb: plan.guestMb, cpus: s.profile.cpus,
                            tbCacheMb: plan.tbCacheMb, cpuModel: s.cpuModel,
                            hostmemMb: plan.hostmemMb, width: res.width, height: res.height,
                            refreshHz: s.refreshHz, spiceSocket: Paths.spiceSocket.path,
@@ -203,7 +247,9 @@ final class RuntimeController: ObservableObject {
         qmp.onEvent = { [weak self] event, data in
             Task { @MainActor in self?.qmpEvent(event, data) }
         }
+        DiagLog.write("connecting QMP")
         try await qmp.connect(path: Paths.qmpSocket.path)
+        DiagLog.write("QMP ready (QEMU main loop running)")
         self.qmp = qmp
 
         let agent = AgentClient()
@@ -214,10 +260,12 @@ final class RuntimeController: ObservableObject {
             Task { @MainActor in self?.agentClosed() }
         }
         try await agent.connect(path: Paths.controlSocket.path)
+        DiagLog.write("agent channel connected; waiting for the guest agent")
         self.agent = agent
 
         let input = InputChannel()
         try await input.connect(path: Paths.inputSocket.path)
+        DiagLog.write("input channel connected")
         self.input = input
         controllers.hapticsEnabled = settings.hapticsEnabled
         controllers.bind(to: input)
@@ -225,7 +273,9 @@ final class RuntimeController: ObservableObject {
         let spice = IDSpiceClient(socketPath: Paths.spiceSocket.path)
         spice.audioEnabled = settings.audio
         self.spice = spice
-        if !spice.connect() { warnings.append("SPICE display connection failed; retrying when the view appears.") }
+        let spiceOK = spice.connect()
+        DiagLog.write("SPICE connect started: \(spiceOK)")
+        if !spiceOK { warnings.append("SPICE display connection failed; retrying when the view appears.") }
         displayConnected = spice.connected
     }
 
@@ -234,6 +284,7 @@ final class RuntimeController: ObservableObject {
     private func agentEvent(_ event: String, _ data: [String: Any]) {
         switch event {
         case "ready":
+            DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")")
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running
@@ -273,6 +324,8 @@ final class RuntimeController: ObservableObject {
     }
 
     private func qemuExited(status: Int32, message: String?) {
+        DiagLog.write("QEMU exited with status \(status)\(message.map { ": \($0)" } ?? "")")
+        refreshTails()
         spice?.disconnect()
         qmp?.close()
         agent?.close()
@@ -400,5 +453,13 @@ struct RuntimeFiles {
         }
         return RuntimeFiles(version: v, kernel: kernel, initrd: fm.fileExists(atPath: initrd.path) ? initrd : nil,
                             system: system, cmdline: cmdline)
+    }
+}
+
+extension RuntimeController.Phase {
+    /// Phase text for the boot trace (failures include their message).
+    var traceLabel: String {
+        if case .failed(let m) = self { return "failed: \(m)" }
+        return label
     }
 }

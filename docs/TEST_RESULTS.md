@@ -88,6 +88,16 @@ absolute numbers.
 | 2 | all sources compiled; link: GStreamer static libs not found | `$(SYSROOT_DIR)`-based paths in the generated xcconfig |
 | 3 | link: `framework 'Compression' not found` | link `libcompression.tbd` |
 | 4 | link: `GLESv2` "not an allowed client" | skip frameworks with `LC_SUB_CLIENT` when generating link flags |
+| 5 | **IPA built** (146 MB): it embedded all 93 UTM frameworks and every QEMU target | embed only the dependency closure |
+| 6 (`6a8f9e6`) | **IPA built, 19 MB** (75.7 MB unpacked), 37 frameworks | — |
+
+Static checks on the attempt 6 IPA (Mach-O load commands parsed from the
+archive; `tools`-style script, not run on a device):
+
+- Every `@rpath` dependency of the app binary and `qemu-aarch64-softmmu` is present. Nothing is missing.
+- The runtime-`dlopen` libraries are embedded: MoltenVK, plus EGL and GLESv2 (ANGLE).
+- `vulkan/icd.d/MoltenVK_icd.json` → `../../Frameworks/MoltenVK.framework/MoltenVK` resolves inside the bundle (Vulkan API 1.4.0).
+- Info.plist: `com.ideck.app`, edition `jit`, app group `group.com.ideck.app`, manifest URL `…/releases/download/runtime-latest/manifest.json`.
 
 ## How to add results
 
