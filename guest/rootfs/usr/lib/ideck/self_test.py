@@ -84,7 +84,9 @@ def main() -> int:
 
     rc, out = run(["pactl", "info"], as_deck=True)
     sink = re.search(r"Default Sink: (.*)", out)
-    check(checks, "audio", rc == 0 and sink is not None, sink.group(1) if sink else out.strip()[:200])
+    # "auto_null" is PipeWire's dummy sink: no audio device reached the guest.
+    real_sink = sink is not None and sink.group(1).strip() not in ("", "auto_null")
+    check(checks, "audio", rc == 0 and real_sink, sink.group(1) if sink else out.strip()[:200])
 
     check(checks, "uinput", os.path.exists("/dev/uinput"), "/dev/uinput (virtual controllers)")
     rc, out = run(["systemctl", "is-active", "ideck-agent.service"])

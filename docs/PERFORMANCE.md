@@ -52,9 +52,26 @@ reference point for the same code.
 | ipc | 9.67 Gops/s |
 | syscall, jit_translate | not measured on Windows |
 
-The CI boot test runs the same benchmark inside the guest under QEMU TCG on an
-arm64 GitHub runner (`out/boot-test/bench.json`). Those numbers describe TCG on a
-Neoverse server core, not an M5. A device run is needed for real iPad figures.
+## Guest under TCG (measured in CI, not an iPad)
+
+The same benchmark inside the guest under QEMU 8.2 TCG on a GitHub
+`ubuntu-24.04-arm` runner (run 42999579844, 4 vCPU, `neoverse-n1` model):
+
+| Benchmark | TCG guest | Note |
+|---|---|---|
+| int_single | 2698 Mops/s | integer code translates efficiently |
+| fp_single | 220 MFLOP/s | soft-float helpers: the main FP bottleneck |
+| int_multi (4 vCPU) | 10171 Mops/s (3.77×) | MTTCG scales |
+| mem_bandwidth (memcpy) | 366 MB/s | byte-wise helper copies |
+| mem_read | 3702 MB/s | |
+| mem_latency | 523 ns | softmmu TLB walk on misses |
+| syscall | 25.4 µs | full exception round trip |
+| ipc | 2.16 Gops/s | |
+| jit_translate | 14.1 µs per block cold, 0.37 µs warm | |
+
+Booting to the agent took 34 s. These describe TCG on a Neoverse server
+core. An M5 run is needed for iPad figures, and FP/memcpy-heavy games will
+feel these costs most.
 
 ## Benchmark plan for games
 

@@ -6,12 +6,13 @@ Valve's native ARM64 Steam desktop client inside it, and shows it full-screen
 with controller, keyboard, mouse, touch and audio support. No PC, cloud
 service or streaming is involved in gameplay.
 
-> **Status: v0.1.0, first complete implementation, not yet run on an iPad.**
-> All components are written. Everything that can be tested on Windows has
-> been built and tested here (see [TEST_RESULTS](docs/TEST_RESULTS.md)). The iOS
-> app build, the Linux image build and the boot/Steam test run in GitHub Actions
-> and have not been executed yet. Nothing in this repository claims that a
-> Steam game has run on an iPad.
+> **Status: v0.1.0, builds in CI, not yet run on an iPad.**
+> The sideload IPA builds in GitHub Actions. The Linux runtime builds and
+> passes its CI boot test under QEMU TCG: it boots in 34 s, creates the
+> virtual controller, installs the ARM64 Steam client and the FEX RootFS, and
+> starts the Steam service. A Steam window has not yet been captured in CI,
+> where there is no GPU. See [TEST_RESULTS](docs/TEST_RESULTS.md). Nothing in
+> this repository claims that a Steam game has run on an iPad.
 
 ## How it works
 

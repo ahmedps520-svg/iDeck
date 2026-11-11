@@ -88,7 +88,7 @@ targets:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: -O
           GCC_OPTIMIZATION_LEVEL: s
-    postCompileScripts:
+    postBuildScripts:
       - name: Embed QEMU, graphics and SPICE frameworks
         script: 'bash "${PROJECT_DIR}/scripts/embed_sysroot.sh"'
         basedOnDependencyAnalysis: false
@@ -126,7 +126,7 @@ targets:
         IDECK_EDITION: se
         IDECK_SYSROOT_SUFFIX: "-TCI"
         LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks"]
-    postCompileScripts:
+    postBuildScripts:
       - name: Embed QEMU, graphics and SPICE frameworks
         script: 'bash "${PROJECT_DIR}/scripts/embed_sysroot.sh"'
         basedOnDependencyAnalysis: false

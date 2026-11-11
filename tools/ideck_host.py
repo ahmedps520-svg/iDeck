@@ -163,7 +163,7 @@ def main() -> int:
     ap.add_argument("--data-size-gb", type=int, default=24)
     ap.add_argument("--timeout-boot", type=int, default=1800)
     ap.add_argument("--timeout-provision", type=int, default=5400)
-    ap.add_argument("--steam-wait", type=int, default=1800)
+    ap.add_argument("--steam-wait", type=int, default=3600)
     ap.add_argument("--skip-bench", action="store_true")
     a = ap.parse_args()
 
@@ -242,21 +242,40 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001
                 log("benchmark", str(e), ok=False)
 
-        # Steam window: screenshots every 2 minutes while waiting for it.
+        # Steam window: screenshot every 2 minutes. An empty session (only
+        # the background colour) compresses to ~5 KB; once a frame is much
+        # larger a window is on screen, so take one more and stop.
         deadline = time.time() + a.steam_wait
         shot = 0
+        window_seen_at = None
         while time.time() < deadline:
             st = agent.request("steam.status")
             path = a.report / f"screen-{shot:02d}.png"
+            size = 0
             try:
                 qmp.run("screendump", {"filename": str(path), "format": "png"})
+                time.sleep(1)
+                size = path.stat().st_size if path.exists() else 0
             except Exception as e:  # noqa: BLE001
                 log("screendump", str(e), ok=False)
-            log("steam-wait", {"pids": st.get("pids"), "service": st.get("service"), "screenshot": path.name})
+            log("steam-wait", {"pids": st.get("pids"), "service": st.get("service"), "screenshot": path.name,
+                               "png_bytes": size})
             shot += 1
-            if st.get("pids") and shot >= 4:
+            if size > 20000 and window_seen_at is None:
+                window_seen_at = shot
+                report["steam_window_seconds"] = round(time.time() - t0, 1)
+            elif window_seen_at is not None:
                 break
             time.sleep(120)
+        report["steam_window_seen"] = window_seen_at is not None
+
+        # Steam's own output (stdout/stderr go to the journal of ideck-steam).
+        for unit in ("ideck-steam.service", "ideck-provision.service", "ideck-session.service"):
+            try:
+                out = agent.request("logs", {"unit": unit, "lines": 1500}, timeout=120)
+                (a.report / f"journal-{unit}.txt").write_text(out.get("output", ""))
+            except Exception as e:  # noqa: BLE001
+                log("journal", f"{unit}: {e}", ok=False)
 
         try:
             log("selftest", agent.request("selftest.run", timeout=900))
