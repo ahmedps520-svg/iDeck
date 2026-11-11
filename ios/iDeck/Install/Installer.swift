@@ -392,14 +392,15 @@ final class Installer: ObservableObject {
         runtime.refreshInstalledState()
     }
 
-    private func bootGuest() async throws {
+    private func bootGuest(stepID: String = "boot-guest") async throws {
         if !runtime.isRunning {
             guard runtime.jitAvailable else {
                 needsJIT = true
                 throw WaitForUser(message: "Enable JIT, then continue setup")
             }
             needsJIT = false
-            update("boot-guest", detail: "Starting Linux for the first time (this can take a few minutes)")
+            update(stepID, detail: stepID == "boot-guest" ? "Starting Linux for the first time (this can take a few minutes)"
+                                                           : "Starting Linux to continue setup")
             // Not awaited: the loop below shows each startup phase, elapsed
             // time and the guest console while QEMU starts.
             Task { await runtime.startGaming() }
@@ -413,7 +414,7 @@ final class Installer: ObservableObject {
         while Date() < deadline {
             switch runtime.phase {
             case .running:
-                update("boot-guest", detail: "Linux is running (\(Int(Date().timeIntervalSince(started))) s)", progress: 1)
+                update(stepID, detail: "Linux is running (\(Int(Date().timeIntervalSince(started))) s)", progress: 1)
                 return
             case .failed(let m):
                 throw Core.CallError(message: m)
@@ -427,7 +428,7 @@ final class Installer: ObservableObject {
             case .booting(let s), .starting(let s):
                 let elapsed = Int(Date().timeIntervalSince(started))
                 let console = runtime.consoleTail.last.map { " · \($0.prefix(90))" } ?? " · no console output yet"
-                update("boot-guest", detail: "\(s) · \(elapsed / 60):\(String(format: "%02d", elapsed % 60))\(console)")
+                update(stepID, detail: "\(s) · \(elapsed / 60):\(String(format: "%02d", elapsed % 60))\(console)")
             default:
                 break
             }
@@ -440,10 +441,17 @@ final class Installer: ObservableObject {
 
     /// Mirrors a step of the in-guest provisioning service.
     private func waitForGuestStep(_ id: String) async throws -> Bool {
+        // After an app restart Linux is not running: start it here (asking
+        // for JIT first if needed) instead of stopping with no way forward.
+        if !runtime.isRunning || runtime.phase != .running {
+            try await bootGuest(stepID: id)
+        }
         let deadline = Date().addingTimeInterval(4 * 3600)
         var retried = false
         while Date() < deadline {
-            guard runtime.isRunning else { throw WaitForUser(message: "Start Linux to continue setup") }
+            guard runtime.isRunning else {
+                throw WaitForUser(message: "Linux stopped. Close iDeck from the app switcher, open it again and tap Continue Setup.")
+            }
             let steps = runtime.provision["steps"] as? [[String: Any]] ?? []
             if let s = steps.first(where: { $0["id"] as? String == id }) {
                 let state = s["state"] as? String ?? "pending"

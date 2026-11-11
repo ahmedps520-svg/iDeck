@@ -184,9 +184,19 @@ final class RuntimeController: ObservableObject {
         refreshTails()
     }
 
+    private var tailTicks = 0
+
     func refreshTails() {
         consoleTail = DiagLog.tail(Paths.consoleLog, lines: 12)
         qemuLogTail = DiagLog.tail(Paths.qemuLog, lines: 8)
+        // Memory trend every 10 s while Linux runs: if iPadOS terminates
+        // iDeck (jetsam), ideck.previous.log shows what led up to it.
+        tailTicks += 1
+        if tailTicks % 5 == 0 && (isRunning || phase == .stopping) {
+            DiagLog.write("mem: footprint \(IDPlatform.physFootprint >> 20) MiB, available \(IDPlatform.availableMemory >> 20) MiB, "
+                          + "guest used \(metrics.memUsedKB >> 10)/\(metrics.memTotalKB >> 10) MiB, pressure \(memory.sample.level), "
+                          + "guest cpu \(Int(metrics.cpuPercent))%")
+        }
     }
 
     /// The guest kernel command line: the manifest's, made verbose so the
@@ -356,6 +366,11 @@ final class RuntimeController: ObservableObject {
             Task { await growLibraryIfNeeded() }
         case "provision":
             provision = data
+            let steps = (data["steps"] as? [[String: Any]] ?? []).map { s -> String in
+                let p = (s["progress"] as? Double).map { String(format: " %.0f%%", $0 * 100) } ?? ""
+                return "\(s["id"] as? String ?? "?")=\(s["state"] as? String ?? "?")\(p)"
+            }
+            DiagLog.write("provision[\(data["state"] as? String ?? "?")]: \(steps.joined(separator: ", "))")
         case "shutdown":
             phase = .stopping
         default:
