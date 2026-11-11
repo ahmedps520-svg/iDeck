@@ -17,7 +17,10 @@ done
 # Static GStreamer plugins used by spice-gtk audio playback.
 if [ -d "$SYSROOT/lib/gstreamer-1.0" ]; then
     for a in "$SYSROOT"/lib/gstreamer-1.0/libgst*.a; do
-        [ -e "$a" ] && flags+=("\"$a\"")
+        # Referenced through the build setting, not this script's working
+        # directory: Xcode links from ios/, and each target has its own
+        # sysroot (JIT vs TCI).
+        [ -e "$a" ] && flags+=("\"\$(SYSROOT_DIR)/lib/gstreamer-1.0/$(basename "$a")\"")
     done
 fi
 {
