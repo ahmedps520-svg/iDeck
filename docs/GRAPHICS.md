@@ -23,7 +23,11 @@ self-test reports `opengl`/`vulkan` as **failed** rather than accelerated.
 - **Environment:**
   - `ANGLE_DEFAULT_PLATFORM=metal`
   - `VK_DRIVER_FILES=<app>/vulkan/icd.d/MoltenVK_icd.json`
-  - `APP_SANDBOX_GROUP_ID=<app group>`: virglrenderer's `shm_open` for blob memory is only allowed under the app group prefix in the sandbox. Without it, Venus fails with `VK_ERROR_OUT_OF_HOST_MEMORY`. This is the most likely cause of the shared-memory failure seen in the earlier experiment.
+  - `APP_SANDBOX_GROUP_ID=<app group>`: virglrenderer's `shm_open` for blob memory is only allowed under an app group prefix that is in the code signature.
+- **Blob memory without an app group** (free Apple ID signing, Sideloadly): iDeck points the `shm_open`/`shm_unlink` imports of its embedded frameworks at a stand-in (`IDSharedMemoryFallback.c`). The stand-in tries the real call; when the sandbox refuses it, it opens an unlinked file in `tmp/ideck-gpu` instead.
+  - QEMU, virglrenderer and MoltenVK share one process, so a file descriptor works like shared memory: `ftruncate`, `MAP_SHARED` and `fstat` behave the same.
+  - At launch, the stand-in and a Metal round trip on a file mapping (`newBufferWithBytesNoCopy`, as MoltenVK imports host memory) must pass, or Vulkan stays off for the session.
+  - No system code is patched; the files are in the app's own container.
 - **Guest:** Xorg modesetting with glamor (GL through virgl). Vulkan compositing of the desktop is avoided because UTM reports it broken (no indirect draws for geometry shaders on Metal).
 
 ## Capability limits (researched November 2026)

@@ -241,6 +241,48 @@ Build 22: one-finger drag scrolls (wheel notches by finger distance), two-finger
 - adds Lightweight Steam (`-nofriendsui -nochatui`, on by default);
 - makes the agent queue Steam start, stop and restart without blocking.
 
+### CI, Linux runtime 0.1.6 software-UI boot test (run 43081858902): inconclusive
+
+Steam was started with `-cef-disable-gpu -cef-disable-gpu-compositing`
+(`--steam-software-ui`), the app's Software-rendered Steam UI path.
+- The client started, but `steamwebhelper` restarted about every 10 s.
+- The client logged `Failed creating offscreen shared JS context`, wrote assert dumps, and exited with SIGBUS three times. systemd then stopped retrying.
+- Every screenshot was blank (4319-byte PNGs).
+
+The same mode shows a working Steam window on the iPad (build 21, above), and
+the CI GPU-mode test painted the client (0.1.4). So this failure belongs to
+the CI VM (no virgl, llvmpipe only). It is not evidence about the device.
+
+### Vulkan without app groups (build 24, CI only)
+
+Problem: Sideloadly free-account signing carries no app group, so
+virglrenderer's `shm_open("<group>/<hex>")` fails with EPERM and every Venus
+blob failed. Builds 16–22 therefore turned Vulkan off.
+
+Build 24 serves those calls from unlinked files in `tmp/ideck-gpu`
+(`ios/iDeck/Native/IDSharedMemoryFallback.c`):
+- the `shm_open`/`shm_unlink` import slots of the embedded frameworks are pointed at a stand-in;
+- the stand-in tries the real call first.
+
+Evidence so far:
+- **Static check of the build 22 IPA** (Mach-O indirect symbol tables, `shm_imports.py`): `virglrenderer.1`, `qemu-aarch64-softmmu` and `spice-server.1` import `_shm_open` and `_shm_unlink` through `__DATA_CONST,__got`. All are arm64 (not arm64e) with chained fixups, which is the layout the stand-in rewrites.
+- **CI `shm-fallback` job (macos-15, commit `f5b47b4`): PASS in both modes.** A test library repeats anon_file.c's sequence (named `shm_open` with O_EXCL retry, `shm_unlink`, `ftruncate`, two `MAP_SHARED` mappings) at 16 KiB, 1 MiB and 64 MiB, plus the EEXIST case.
+  - Plain run: 1 image and 2 slots redirected; 5 of 6 calls answered with files; no file left behind.
+  - Under `sandbox-exec` with `(deny ipc-posix-shm*)`: the real `shm_open` fails with "Operation not permitted", as on the iPad. All allocations still succeed through files.
+- **On device**, not yet run. At launch the app repeats the sequence and has Metal wrap the file mapping (`newBufferWithBytesNoCopy`, as MoltenVK does for imported host memory), copy it and write into it. The `signature:` log line then reads `GPU shared memory file-backed fallback (...)` and `vm:` shows `vulkan true`. Whether Venus then gives the guest a working Vulkan device is the open question for the next device run (Runtime › Self-test `vulkan` check).
+
+### iPhone and 8 GB devices (build 24, CI only)
+
+- Core tests: 35 tests, 344 checks, 0 failures. New cases:
+  - 8 GB device (7680 MiB, 3400 MiB limit): a 3 GiB guest fits only with file-backed guest RAM;
+  - 12 GB device with the measured 5120 MiB limit: 4 GiB.
+- Not run on an iPhone or an iPad Air yet.
+
+**Build 24 IPA** (`ios.yml` run 43109479420, commit `ca3ca06`, 19.0 MB):
+- `UIDeviceFamily` [1, 2] (iPhone and iPad); all 34 needed frameworks are embedded.
+- The app binary contains the fallback's strings (`ideck-selftest/%x`, `ideck-metal/%x`) and imports `_dyld_register_func_for_add_image`.
+- The three frameworks still import `_shm_open` through `__DATA_CONST,__got`.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

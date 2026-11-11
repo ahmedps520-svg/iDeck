@@ -1,18 +1,19 @@
 # iDeck
 
-**Steam on iPad, running locally.** iDeck is a native iPadOS app that boots a
+**Steam on iPad and iPhone, running locally.** iDeck is a native iOS/iPadOS app that boots a
 minimal ARM64 Linux system in an emulated machine on the iPad itself, installs
 Valve's native ARM64 Steam desktop client inside it, and shows it full-screen
 with controller, keyboard, mouse, touch and audio support. No PC, cloud
 service or streaming is involved in gameplay.
 
-> **Status: v0.1.0, builds in CI, not yet run on an iPad.**
-> The sideload IPA builds in GitHub Actions. The Linux runtime builds and
-> passes its CI boot test under QEMU TCG: it boots in 34 s, creates the
-> virtual controller, installs the ARM64 Steam client and the FEX RootFS, and
-> starts the Steam service. A Steam window has not yet been captured in CI,
-> where there is no GPU. See [TEST_RESULTS](docs/TEST_RESULTS.md). Nothing in
-> this repository claims that a Steam game has run on an iPad.
+> **Status: v0.1, runs on an M5 iPad Pro.** Linux boots in about 10 s, setup
+> installs the ARM64 Steam client, and the Steam UI is usable with the
+> software-rendered UI option. It is slow under emulation.
+> - Vulkan without app groups (file-backed blob memory) passes in CI on macOS but has not run on a device yet.
+> - iPhone (16 Pro / Pro Max and later) and iPad Air M3 support is built but untested.
+> - No Steam game has been confirmed running yet.
+>
+> See [TEST_RESULTS](docs/TEST_RESULTS.md) and [supported devices](docs/DISTRIBUTION.md#supported-devices).
 
 ## How it works
 

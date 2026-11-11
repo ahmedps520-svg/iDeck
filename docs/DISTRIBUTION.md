@@ -57,11 +57,26 @@ pairing. Not implemented.
 | `get-task-allow` | debugger attach → JIT | yes (development signing) |
 | `com.apple.developer.kernel.increased-memory-limit` | larger jetsam limit | yes (per Henge's signing notes) |
 | `com.apple.developer.kernel.extended-virtual-addressing` | more VA for guest RAM + dual JIT mapping | **no**, so sideloaders drop it |
-| `com.apple.security.application-groups` | lets virglrenderer `shm_open` Venus blob memory in the sandbox | depends on the sideloading tool: AltStore/SideStore register groups, others may not |
+| `com.apple.security.application-groups` | lets virglrenderer `shm_open` Venus blob memory in the sandbox | depends on the sideloading tool: Sideloadly with a free account signs **none** (seen on device: `signature: app groups []`) |
 
-If the app group is missing, iDeck warns that Vulkan blob memory will fail
-(UTM PR #8044 found this causes `VK_ERROR_OUT_OF_HOST_MEMORY`). OpenGL (virgl)
-still works.
+Without the app group, POSIX shared memory is refused (EPERM). In that case
+iDeck (build 24+) gives Venus file-backed blob memory instead; see
+[GRAPHICS](GRAPHICS.md). Builds 16–22 turned Vulkan off. OpenGL (virgl) works
+either way.
+
+## Supported devices
+
+iDeck needs 8 GB of RAM, JIT through StikDebug, and iOS/iPadOS 17 or later.
+Sizing comes from the measured RAM, memory limit and core count, not from a
+model list:
+
+| Class | Devices | Guest RAM (file-backed) | vCPUs Balanced / Performance |
+|---|---|---|---|
+| 8 GB | iPhone 16 Pro, 16 Pro Max; iPad Air M3 | 3 GiB, with lz4 zram swap in Linux | 4 / 5 on iPhone, 4 / 6 on M3 |
+| 12 GB+ | iPhone 17 Pro / Pro Max / Air, iPhone 18 Pro; M4/M5 iPad Pro | 4 GiB | 4 / 5 on iPhone, 4 / 6 on iPad |
+
+On iPhone, Steam opens in Small Mode by default, and the display can be
+pinch-zoomed. Only the M5 iPad Pro has been tested on a device so far.
 
 ## Memory limits
 
@@ -70,12 +85,17 @@ Public measurements, none taken on an M5 iPad:
 - 12 GB iPhone 17 Pro Max with the increased-memory-limit entitlement: about 6144 MB (Apple Developer Forums, thread 834805).
 - 16 GB M4 iPad Pro on iPadOS 27: 5.3–6 GB available (NomadSculpt forum).
 
-The core therefore estimates the limit as 50% of RAM with the entitlement and
-37.5% without, but always prefers `os_proc_available_memory()` measured at
-runtime. On a 12 GB M5 that predicts a **3 GiB guest**, with 4 GiB if the
-measured limit allows. File-backed guest RAM (`memory-backend-file`, Advanced
-Settings) is an experimental way to keep guest pages out of the jetsam
-footprint. It is untested.
+Measured on an M5 iPad Pro (iPad17,2, iPadOS 27.2, Sideloadly free account):
+5120 MiB limit.
+
+The core estimates the limit as 50% of RAM with the entitlement and 37.5%
+without, but always prefers `os_proc_available_memory()` measured at runtime.
+Guest RAM is file-backed by default (`memory-backend-file,share=on`). On the
+M5, the footprint stayed near 1 GiB with 780 MiB of guest RAM in use. The
+planner therefore charges a quarter of guest RAM to the limit and caps guest
+RAM at about 40% of device RAM:
+- 8 GB devices get 3 GiB;
+- 12 GB devices get 4 GiB.
 
 ## Building without a Mac
 

@@ -11,11 +11,14 @@
 | Setup stops at verify | Corrupt or incomplete download | Retry. The bad file is deleted and downloaded again. |
 | Setup: not enough storage | Fewer than about 12 GB free, or less than the manifest needs | Free space, then Continue Setup |
 | Black screen, app closes when booting | Jetsam: the memory limit was exceeded | Settings › Linux memory: try 3 GB or 2 GB, or the Battery Saver profile. Check Runtime › Memory plan notes. (The earlier experiment's black screen at 3072 MB is consistent with this or with the old iOS hostmem BAR bug fixed in UTM 5.0.5; not verified.) |
-| "Vulkan is off for this session: iPadOS refused GPU shared memory" (log: `signature: app groups []`, `shm_open(...) failed: Operation not permitted`) | The signing tool removed the app group. Venus blob memory is POSIX shared memory that iPadOS only allows under an app group in the code signature. | OpenGL and the Steam client still work. For Vulkan, re-sign with a tool that keeps app groups. The log's `signature:` line shows what the signature carries. |
+| Log `signature: ... GPU shared memory file-backed fallback` | Normal with free Apple ID signing: there is no app group, so Venus blob memory comes from files in tmp/ (build 24+) | Nothing to do. `gpu shm:` lines show how many allocations used files. |
+| "Vulkan is off for this session: no GPU shared memory" | Both the app-group shared memory and the file fallback failed. The reason is in the message and on the `signature:` log line. | OpenGL and the Steam client still work. Share `ideck.log`. |
 | Self-test: vulkan warning, "llvmpipe" | Venus unavailable (see above) | Optional since runtime 0.1.4: setup continues. |
 | "JIT was enabled N seconds ago…" / iDeck closed with SIGTRAP in `tcg_region_init` | StikDebug attached long before Linux started (e.g. during a runtime download) and no longer answered QEMU's JIT request | Close iDeck from the app switcher, enable JIT again in StikDebug, then continue. Since build 17 iDeck asks for this instead of crashing. |
 | Self-test: opengl shows llvmpipe | virgl not active | Check the QEMU log for `virtio-gpu-gl`/ANGLE errors. Reinstall the IPA (embedded frameworks). |
-| Steam window blank or crashes (CEF) | steamwebhelper GPU path | Settings › Software-rendered Steam UI, then Runtime › Restart Steam |
+| Steam window blank or crashes (CEF) | steamwebhelper GPU path | Settings › Software-rendered Steam UI (on by default since build 24). Steam restarts by itself. |
+| Steam slow or heavy with no game open | The Steam UI is a Chromium app running on an emulated CPU | Settings › Lightweight Steam and Compact library (Small Mode). In Steam: turn off Shader Pre-Caching, the Steam Overlay and smooth scrolling, and turn on Library › Low Performance Mode. Use Battery Saver or 540p on an iPhone if it gets hot. |
+| Text too small on iPhone | 1280×720 Linux display on a phone screen | Pinch to zoom; two fingers move the zoomed view; ⋯ › Reset Zoom |
 | Steam stuck updating | First update under emulation is slow | Wait. Progress is visible in the Steam window. |
 | Steam bootstrap failed | Valve changed CDN packages, or a network problem | Runtime › Repair Setup. Share the provision log (Runtime › Console log). |
 | Controller not detected in a game | Game expects a different pad | Enable Steam Input for the game. iDeck pads appear as Xbox 360 controllers. |
