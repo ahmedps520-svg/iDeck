@@ -22,6 +22,10 @@ struct GameView: View {
             overlay
         }
         .statusBarHidden(true)
+        // StikDebug returned with JIT ready: start Linux without another tap.
+        .onChange(of: runtime.jitReadyEvent) { _ in
+            Task { await runtime.startGaming() }
+        }
         .persistentSystemOverlays(.hidden)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
@@ -125,22 +129,27 @@ struct JITHelpView: View {
         VStack(alignment: .leading, spacing: 18) {
             Label("Enable JIT to start Linux", systemImage: "bolt.badge.clock")
                 .font(.system(.title2, design: .rounded).weight(.bold)).foregroundStyle(.white)
-            Text("iDeck emulates an ARM64 PC. Without JIT the emulator is far too slow for games, and iPadOS only allows JIT for sideloaded apps while a debugger is attached at launch.")
+            Text(runtime.jitProblem)
+                .font(.callout.weight(.semibold)).foregroundStyle(Theme.warning)
+            Text("iDeck emulates an ARM64 PC. iPadOS only allows the emulator's JIT while a debugger (StikDebug) is attached. Without it the emulator is far too slow to run.")
                 .foregroundStyle(Theme.textSecondary)
-            VStack(alignment: .leading, spacing: 10) {
-                step(1, "Open StikDebug (with LocalDevVPN connected and a pairing file imported).")
-                step(2, "Tap Enable JIT and choose iDeck. iDeck uses the same JIT protocol as UTM (the legacy script).")
-                step(3, "iDeck relaunches with JIT. Tap Start Gaming again.")
-            }
             HStack(spacing: 12) {
-                Button("Open StikDebug") {
-                    if let url = URL(string: "stikdebug://") { UIApplication.shared.open(url) }
-                }.buttonStyle(PrimaryButtonStyle())
+                Button("Enable JIT with StikDebug") { runtime.requestJIT() }
+                    .buttonStyle(PrimaryButtonStyle())
                 Button("Check Again") { Task { await runtime.startGaming() } }.buttonStyle(SecondaryButtonStyle())
                 Button("Close", action: onClose).buttonStyle(SecondaryButtonStyle())
             }
-            Text(IDPlatform.needsTXMJITProtocol ? "iPadOS 26+: debugger-assisted JIT (TXM) is required." : "")
-                .font(.caption).foregroundStyle(Theme.textTertiary)
+            Text("StikDebug asks you to confirm, attaches with its legacy.js script and returns to iDeck, which then continues by itself.")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("If that does not work, do it by hand:").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                step(1, "Open StikDebug (LocalDevVPN connected, pairing file imported).")
+                step(2, "Long-press iDeck in its app list › Assign Script › legacy.js (once).")
+                step(3, "Tap Enable JIT for iDeck, and leave StikDebug running in the background.")
+            }
+            Text("State: CS_DEBUGGED \(IDPlatform.isDebuggerAttached ? "yes" : "no") · debugger attached \(IDPlatform.isTraced ? "yes" : "no")"
+                 + (IDPlatform.needsTXMJITProtocol ? " · iPadOS 26+ (TXM)" : ""))
+                .font(.caption.monospaced()).foregroundStyle(Theme.textTertiary)
         }
         .padding(32).frame(maxWidth: 640)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))

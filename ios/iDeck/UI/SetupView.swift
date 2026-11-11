@@ -77,6 +77,10 @@ struct SetupView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Theme.background.ignoresSafeArea())
+        // StikDebug returned with JIT ready: continue setup automatically.
+        .onChange(of: runtime.jitReadyEvent) { _ in
+            if !installer.isComplete && !installer.running { Task { await installer.run() } }
+        }
     }
 }
 

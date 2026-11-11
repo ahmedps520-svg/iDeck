@@ -2,7 +2,9 @@
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Enable JIT to start Linux" | iDeck was opened without a debugger attached | Enable JIT for iDeck in StikDebug each launch. Check that LocalDevVPN is on and the pairing file is valid. Use StikDebug ≥ 3.1.12 on iPadOS 26.4+. |
+| "Enable JIT to start Linux" | iDeck was opened without a debugger attached | Tap **Enable JIT with StikDebug** in iDeck, or enable JIT for iDeck in StikDebug each launch. Check that LocalDevVPN is on and the pairing file is valid. Use StikDebug ≥ 3.1.12 on iPadOS 26.4+. |
+| "JIT was enabled, but StikDebug detached right away" (Diagnostics: CS_DEBUGGED yes, debugger attached no) | StikDebug ran no script for iDeck (it auto-assigns scripts by app name and does not know iDeck) | Use the in-app button (it requests legacy.js), or in StikDebug long-press iDeck › Assign Script › legacy.js. Never assign universal.js. |
+| QEMU log: `Property 'virtio-gpu-gl-pci.refresh_rate' not found` | Builds 1–9 passed an option this QEMU lacks | Install build 10 or later |
 | StikDebug cannot find iDeck | IPA not development-signed | Re-sign with Sideloadly, AltStore or SideStore (they keep `get-task-allow`) |
 | "Restart iDeck" after Linux stopped | QEMU starts once per app launch | Close iDeck from the app switcher, enable JIT, then open it again |
 | Setup: "No runtime source is configured" | IPA built without a manifest URL | Settings › Advanced › Runtime manifest URL, e.g. `https://github.com/<you>/<repo>/releases/download/runtime-latest/manifest.json` |

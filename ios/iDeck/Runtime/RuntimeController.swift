@@ -95,8 +95,54 @@ final class RuntimeController: ObservableObject {
         }
     }
 
+    /// Whether QEMU's JIT can work if started now.
+    ///
+    /// On iPadOS 26+ (TXM) the utmapp QEMU asks an *attached* debugger to
+    /// prepare its code buffer (`brk #0x69`, only when P_TRACED), which is
+    /// what StikDebug's legacy.js script services; it stays attached until
+    /// that request. CS_DEBUGGED alone (StikDebug without a script attaches
+    /// and detaches at once) is not enough. Seen on device: CS_DEBUGGED true,
+    /// traced false.
     var jitAvailable: Bool {
-        RuntimeController.edition == "se" || IDPlatform.isDebuggerAttached
+        if RuntimeController.edition == "se" { return true }
+        if IDPlatform.needsTXMJITProtocol { return IDPlatform.isTraced }
+        return IDPlatform.isDebuggerAttached
+    }
+
+    /// Plain-language reason JIT is not usable, for the help screen.
+    var jitProblem: String {
+        if !IDPlatform.isDebuggerAttached {
+            return "JIT is not enabled yet."
+        }
+        if IDPlatform.needsTXMJITProtocol && !IDPlatform.isTraced {
+            return "JIT was enabled, but StikDebug detached right away. On iPadOS 26 and later iDeck needs StikDebug's legacy.js script, which stays attached until Linux starts."
+        }
+        return "JIT is ready."
+    }
+
+    /// Incremented when StikDebug hands iDeck back with JIT ready; setup and
+    /// the game screen continue automatically.
+    @Published private(set) var jitReadyEvent = 0
+    private var jitRequestPending = false
+
+    /// Asks StikDebug to attach to this process with legacy.js (StikDebug's
+    /// documented enable-jit URL). StikDebug asks the user to confirm, then
+    /// returns to iDeck.
+    func requestJIT() {
+        var c = URLComponents()
+        c.scheme = "stikdebug"
+        c.host = "enable-jit"
+        c.queryItems = [
+            URLQueryItem(name: "bundle-id", value: Bundle.main.bundleIdentifier ?? "com.ideck.app"),
+            URLQueryItem(name: "pid", value: String(getpid())),
+            URLQueryItem(name: "script-name", value: "legacy.js"),
+        ]
+        guard let url = c.url else { return }
+        jitRequestPending = true
+        DiagLog.write("requesting JIT: \(url.absoluteString)")
+        UIApplication.shared.open(url) { ok in
+            if !ok { DiagLog.write("could not open StikDebug (not installed?)") }
+        }
     }
 
     // MARK: Start
@@ -360,6 +406,19 @@ final class RuntimeController: ObservableObject {
     }
 
     private func didReturnToForeground() async {
+        if jitRequestPending || phase == .needsJIT {
+            // StikDebug attaches, then brings iDeck back; give it a moment.
+            for _ in 0..<20 where !jitAvailable {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            DiagLog.write("foreground: CS_DEBUGGED \(IDPlatform.isDebuggerAttached) traced \(IDPlatform.isTraced)")
+            if jitAvailable {
+                jitRequestPending = false
+                if phase == .needsJIT { phase = .stopped }
+                jitReadyEvent += 1
+            }
+            return
+        }
         guard case .running = phase, let agent else { return }
         // The VM was suspended with the app; correct the guest clock.
         _ = try? await agent.request("time.sync", ["unix_ms": Int64(Date().timeIntervalSince1970 * 1000)])

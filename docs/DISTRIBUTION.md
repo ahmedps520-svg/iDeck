@@ -31,11 +31,18 @@ iDeck uses the utmapp/qemu fork's TCG region allocator (`tcg/region.c`,
 2. creates a RW alias with `mach_vm_remap` (`split-wx=on`, set by `core/qemu_args`),
 3. if the process is being traced, executes `brk #0x69` with x0=address and x1=size, so the attached debugger can make the region executable under TXM.
 
-StikDebug implements the debugger side. UTM's entry in StikDebug uses the
-`legacy.js` script, which is this protocol. StikDebug documents no URL scheme
-for requesting JIT, so iDeck shows the steps and an **Open StikDebug** button
-(`stikdebug://` is the app's registered scheme). It detects success with
-`csops(CS_OPS_STATUS)` → `CS_DEBUGGED` (`IDPlatform.isDebuggerAttached`).
+StikDebug implements the debugger side with its `legacy.js` script, verified
+in StikDebug's source (StikDebug/StikDebug @ 0393dca):
+
+- legacy.js attaches, continues past every stop until the first `brk #0x69`, writes to each 16 KiB page of the RX range through debugserver (which makes it usable for JIT under TXM), then detaches. It services one region per attach, and QEMU allocates one code buffer per process.
+- StikDebug chooses scripts per app: first a script the user assigned (long-press › Assign Script), else an automatic match on the **app name** (e.g. "UTM" → legacy.js). For an unknown app it attaches and detaches immediately. That sets `CS_DEBUGGED` but leaves `P_TRACED` false, so QEMU skips the `brk` and JIT memory is never prepared. This is what the first device run showed.
+- `universal.js` must **not** be used: it rejects `brk #0x69` and never prepares the region.
+
+iDeck therefore:
+
+1. requests JIT itself with StikDebug's `stikdebug://enable-jit?bundle-id=…&pid=…&script-name=legacy.js` URL (`RuntimeController.requestJIT`);
+2. refuses to start QEMU on iPadOS 26+ unless the debugger is still attached (`P_TRACED`, `IDPlatform.isTraced`), not merely `CS_DEBUGGED`;
+3. continues automatically when StikDebug returns it to the foreground with the debugger attached.
 
 Possible improvement: embed StikJIT (MPL-2.0) in an app extension, as Henge does,
 so that on iPadOS 27 JIT can be enabled from inside iDeck with on-device

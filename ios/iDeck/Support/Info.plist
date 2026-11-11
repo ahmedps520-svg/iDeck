@@ -31,6 +31,7 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>stikdebug</string>
+		<string>stikjit</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

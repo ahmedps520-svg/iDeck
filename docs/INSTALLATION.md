@@ -25,9 +25,19 @@ The IPA must be **development-signed** (these tools do that), because that keeps
 
 ## 2. Enable JIT
 
-Open StikDebug, tap **Enable JIT** and choose iDeck. iDeck uses the same JIT
-protocol as UTM; if StikDebug asks for a script, choose the legacy (UTM) script.
-iDeck opens with JIT active. You need to do this each time you launch iDeck.
+On iPadOS 26 and later, the debugger must **stay attached** until Linux
+starts. StikDebug does that with its **legacy.js** script, the same one it
+uses for UTM. It picks scripts by app name, so iDeck must be told explicitly:
+
+- **From iDeck (easiest):** tap **Enable JIT with StikDebug**. iDeck opens StikDebug's `enable-jit` link with `script-name=legacy.js`, StikDebug asks you to confirm, attaches, and returns you to iDeck, which continues by itself.
+- **By hand:** in StikDebug, long-press iDeck › **Assign Script** › **legacy.js** (once), then tap **Enable JIT** for iDeck.
+
+Leave StikDebug running in the background until Linux is up. Repeat this
+each time you open iDeck.
+
+Without the script, StikDebug attaches and detaches immediately. The
+Diagnostics panel then shows "CS_DEBUGGED yes · debugger attached no", and
+iDeck will not start Linux.
 
 ## 3. Run setup
 
