@@ -12,6 +12,9 @@
 @property (nonatomic, weak, nullable) MTKView *view;
 @property (nonatomic, readwrite) BOOL connected;
 @property (nonatomic, readwrite) BOOL relativeMouseMode;
+@property (nonatomic, readwrite) CGFloat zoom;
+/// Offset of the content centre from the view centre, in view points.
+@property (nonatomic) CGPoint panOffset;
 @end
 
 @implementation IDSpiceClient
@@ -59,9 +62,9 @@
     view.device = view.device ?: MTLCreateSystemDefaultDevice();
     view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     view.clearColor = MTLClearColorMake(0.04, 0.04, 0.05, 1.0);
-    // Present on display refresh (ProMotion up to 120 Hz); CocoaSpice only
-    // draws when the guest delivered a new frame.
-    view.preferredFramesPerSecond = 120;
+    // Linux renders at most 60 frames a second; presenting at 120 Hz only
+    // doubled the host GPU work (and heat, on an iPhone).
+    view.preferredFramesPerSecond = 60;
     self.renderer = [[CSMetalRenderer alloc] initWithMetalKitView:view];
     [self.renderer changeUpscaler:MTLSamplerMinMagFilterLinear downscaler:MTLSamplerMinMagFilterLinear];
     view.delegate = self.renderer;
@@ -82,15 +85,81 @@
     self.view = nil;
 }
 
+- (CGFloat)zoom {
+    return _zoom < 1 ? 1 : _zoom;
+}
+
+/// Points of view per guest pixel at the current zoom; 0 if unknown.
+- (CGFloat)pointsPerGuestPixel {
+    CGSize v = self.view.bounds.size;
+    CGSize g = self.displaySize;
+    if (g.width <= 0 || g.height <= 0 || v.width <= 0 || v.height <= 0) return 0;
+    return MIN(v.width / g.width, v.height / g.height) * self.zoom;
+}
+
+/// Keeps zoomed content covering the view (no empty band on a panned edge).
+- (void)clampPan {
+    CGFloat s = [self pointsPerGuestPixel];
+    if (s <= 0) { self.panOffset = CGPointZero; return; }
+    CGSize v = self.view.bounds.size;
+    CGSize g = self.displaySize;
+    CGFloat maxX = MAX(0, (g.width * s - v.width) / 2);
+    CGFloat maxY = MAX(0, (g.height * s - v.height) / 2);
+    self.panOffset = CGPointMake(MIN(MAX(self.panOffset.x, -maxX), maxX), MIN(MAX(self.panOffset.y, -maxY), maxY));
+}
+
 - (void)updateViewport {
     if (!self.renderer || !self.view || !self.display) return;
     CGSize drawable = self.view.drawableSize;
     CGSize guest = self.display.displaySize;
-    if (guest.width <= 0 || guest.height <= 0 || drawable.width <= 0) return;
-    // Aspect-fit the guest framebuffer into the view, centred.
-    CGFloat scale = MIN(drawable.width / guest.width, drawable.height / guest.height);
+    CGSize bounds = self.view.bounds.size;
+    if (guest.width <= 0 || guest.height <= 0 || drawable.width <= 0 || bounds.width <= 0) return;
+    // Aspect-fit the guest framebuffer into the view, centred, then zoom.
+    [self clampPan];
+    CGFloat scale = MIN(drawable.width / guest.width, drawable.height / guest.height) * self.zoom;
+    CGFloat pixelsPerPoint = drawable.width / bounds.width;
     self.renderer.viewportScale = scale;
-    self.renderer.viewportOrigin = CGPointZero;
+    // Renderer origin: drawable pixels from the centre, y up.
+    self.renderer.viewportOrigin = CGPointMake(self.panOffset.x * pixelsPerPoint, -self.panOffset.y * pixelsPerPoint);
+}
+
+- (void)zoomBy:(CGFloat)factor around:(CGPoint)viewPoint {
+    if (!(factor > 0) || !self.view) return;
+    CGFloat old = self.zoom;
+    CGFloat z = MIN(MAX(old * factor, 1), 4);
+    if (z < 1.03) z = 1;
+    // Keep the content under viewPoint fixed: with c the view centre,
+    // viewPoint = c + pan + d*old and should equal c + pan' + d*z.
+    CGPoint c = CGPointMake(CGRectGetMidX(self.view.bounds), CGRectGetMidY(self.view.bounds));
+    CGFloat k = z / old;
+    CGPoint pan = self.panOffset;
+    CGPoint d = CGPointMake(viewPoint.x - c.x - pan.x, viewPoint.y - c.y - pan.y);
+    self.panOffset = CGPointMake(viewPoint.x - c.x - d.x * k, viewPoint.y - c.y - d.y * k);
+    self.zoom = z;
+    if (z == 1) self.panOffset = CGPointZero;
+    [self updateViewport];
+}
+
+- (void)panBy:(CGPoint)delta {
+    if (self.zoom <= 1) return;
+    self.panOffset = CGPointMake(self.panOffset.x + delta.x, self.panOffset.y + delta.y);
+    [self updateViewport];
+}
+
+- (void)resetZoom {
+    self.zoom = 1;
+    self.panOffset = CGPointZero;
+    [self updateViewport];
+}
+
+- (CGPoint)guestPointForViewPoint:(CGPoint)p {
+    CGSize g = self.displaySize;
+    CGFloat s = [self pointsPerGuestPixel];
+    if (s <= 0) return CGPointZero;
+    CGRect b = self.view.bounds;
+    CGFloat left = CGRectGetMidX(b) + self.panOffset.x - g.width * s / 2;
+    CGFloat top = CGRectGetMidY(b) + self.panOffset.y - g.height * s / 2;
+    return CGPointMake(MIN(MAX(0, (p.x - left) / s), g.width - 1), MIN(MAX(0, (p.y - top) / s), g.height - 1));
 }
 
 - (void)requestResolution:(CGSize)size {

@@ -1,0 +1,26 @@
+#!/bin/bash
+# Compressed swap in RAM for small guests (8 GB iPhones and iPads get a
+# 3 GiB Linux). Steam's web views keep a lot of idle memory that compresses
+# well; lz4 is the cheapest compressor to run under emulation. Guests with
+# more than 3.5 GiB do not need it.
+set -euo pipefail
+mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+if [ "${1:-start}" = stop ]; then
+    swapoff /dev/zram0 2>/dev/null || true
+    exit 0
+fi
+if [ "$mem_kb" -gt $((3584 * 1024)) ]; then
+    echo "zram-swap: ${mem_kb} kB RAM, not needed"
+    exit 0
+fi
+modprobe zram num_devices=1 || true
+[ -e /sys/block/zram0 ] || { echo "zram-swap: no zram device" >&2; exit 0; }
+if ! grep -q '^/dev/zram0 ' /proc/swaps; then
+    echo lz4 > /sys/block/zram0/comp_algorithm 2>/dev/null || true
+    echo $((mem_kb / 2))K > /sys/block/zram0/disksize
+    mkswap /dev/zram0 >/dev/null
+    swapon -p 100 /dev/zram0
+fi
+# Swap to zram before dropping file cache; one page at a time (no readahead).
+sysctl -q vm.swappiness=100 vm.page-cluster=0
+echo "zram-swap: $((mem_kb / 2048)) MiB lz4 swap on /dev/zram0"

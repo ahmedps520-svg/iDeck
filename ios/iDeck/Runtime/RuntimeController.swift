@@ -137,7 +137,7 @@ final class RuntimeController: ObservableObject {
                       + "available \(IDPlatform.availableMemory >> 20) MiB, footprint \(IDPlatform.physFootprint >> 20) MiB, "
                       + "RAM \(IDPlatform.physicalMemory >> 20) MiB, cores \(IDPlatform.performanceCores)P+\(IDPlatform.efficiencyCores)E, "
                       + "increased-memory-limit \(IDPlatform.hasIncreasedMemoryLimit), "
-                      + "extended-virtual-addressing \(IDPlatform.hasExtendedVirtualAddressing)")
+                      + "extended-virtual-addressing \(IDPlatform.hasExtendedVirtualAddressing); \(Device.summary)")
         DiagLog.write("signature: app groups \((IDPlatform.signedEntitlements?["com.apple.security.application-groups"] as? [String]) ?? []), "
                       + "candidates \(IDPlatform.applicationGroupCandidates), GPU shared memory \(RuntimeController.sharedMemory.summary)")
         refreshInstalledState()
@@ -187,7 +187,7 @@ final class RuntimeController: ObservableObject {
             return "JIT is not enabled yet."
         }
         if IDPlatform.needsTXMJITProtocol && !IDPlatform.isTraced {
-            return "JIT was enabled, but StikDebug detached right away. On iPadOS 26 and later iDeck needs StikDebug's legacy.js script, which stays attached until Linux starts."
+            return "JIT was enabled, but StikDebug detached right away. On \(Device.os) 26 and later iDeck needs StikDebug's legacy.js script, which stays attached until Linux starts."
         }
         return "JIT is ready."
     }
@@ -329,7 +329,13 @@ final class RuntimeController: ObservableObject {
             : manifest
         let parts = base.split(separator: " ").map(String.init)
             .filter { $0 != "quiet" && !$0.hasPrefix("systemd.show_status=") }
-        return (parts + ["systemd.show_status=true"]).joined(separator: " ")
+        // mitigations=off: the VM runs only this user's Linux, and under TCG
+        // every mitigation (branch-history flushes on each syscall and
+        // exception) is emulated code. nowatchdog: no lockup-detector timer
+        // wakeups on idle vCPUs.
+        let extra = ["systemd.show_status=true", "mitigations=off", "nowatchdog"]
+            .filter { e in !parts.contains { $0.split(separator: "=").first == e.split(separator: "=").first } }
+        return (parts + extra).joined(separator: " ")
     }
 
     private func boot(_ files: RuntimeFiles) async throws {
@@ -340,7 +346,8 @@ final class RuntimeController: ObservableObject {
         let inputs = MemoryInputs(physicalMb: physMb, appLimitMb: limitMb,
                                   currentFootprintMb: IDPlatform.physFootprint >> 20,
                                   increasedMemoryLimit: IDPlatform.hasIncreasedMemoryLimit,
-                                  userGuestMb: s.guestMemoryMb, cpus: s.profile.cpus, vulkan: s.vulkan)
+                                  userGuestMb: s.guestMemoryMb, cpus: s.profile.cpus, vulkan: s.vulkan,
+                                  ramFile: s.ramInFile)
         let plan = try Core.call("memory.plan", inputs, as: MemoryPlan.self)
         self.plan = plan
         warnings = plan.notes
@@ -635,9 +642,9 @@ final class RuntimeController: ObservableObject {
         let s = settings
         let options: [String: Any] = ["bigpicture": s.steamBigPicture, "beta": s.steamBeta,
                                       "cef_software": s.steamSoftwareUI, "overlay": s.showPerformanceOverlay,
-                                      "lightweight": s.steamLightweight]
+                                      "lightweight": s.steamLightweight, "small_mode": s.steamSmallMode]
         let signature = "bigpicture=\(s.steamBigPicture) beta=\(s.steamBeta) cef_software=\(s.steamSoftwareUI)"
-            + " lightweight=\(s.steamLightweight)"
+            + " lightweight=\(s.steamLightweight) small_mode=\(s.steamSmallMode)"
         guard (try? await agent.request("steam.configure", options)) != nil else { return }
         let applied = UserDefaults.standard.string(forKey: RuntimeController.appliedSteamOptionsKey)
         guard applied != signature else { return }

@@ -43,8 +43,21 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 /// that is being torn down after its replacement attached must not take the
 /// display away from the new view (the iPad then stays black).
 - (void)detachFromView:(MTKView *)view NS_SWIFT_NAME(detach(from:));
-/// Recomputes the aspect-fit scale for the current drawable size.
+/// Recomputes the aspect-fit scale (times `zoom`) for the current drawable size.
 - (void)updateViewport;
+
+/// Client-side zoom of the Linux display (pinch on an iPhone screen, where
+/// 720p Steam text is small). 1 = whole display fitted to the view.
+@property (nonatomic, readonly) CGFloat zoom;
+/// Multiplies the zoom by `factor` keeping the content under `viewPoint`
+/// (view points) in place. Clamped to 1...4.
+- (void)zoomBy:(CGFloat)factor around:(CGPoint)viewPoint NS_SWIFT_NAME(zoom(by:around:));
+/// Moves zoomed content by `delta` view points (finger travel).
+- (void)panBy:(CGPoint)delta NS_SWIFT_NAME(pan(by:));
+- (void)resetZoom;
+/// View point (attached view) -> guest framebuffer pixel, clamped to the
+/// display, accounting for aspect fit, zoom and pan.
+- (CGPoint)guestPointForViewPoint:(CGPoint)point NS_SWIFT_NAME(guestPoint(forViewPoint:));
 /// Asks the guest (spice-vdagent) to change resolution.
 - (void)requestResolution:(CGSize)size NS_SWIFT_NAME(requestResolution(_:));
 

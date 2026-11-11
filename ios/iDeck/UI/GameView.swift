@@ -48,6 +48,9 @@ struct GameView: View {
                         Button { Task { try? await runtime.openSteam("steam://open/downloads") } } label: {
                             Label("Steam Downloads", systemImage: "arrow.down.circle")
                         }
+                        Button { runtime.spice?.resetZoom() } label: {
+                            Label("Reset Zoom", systemImage: "arrow.down.right.and.arrow.up.left")
+                        }
                         Divider()
                         Button { model.showGame = false } label: { Label("Back to iDeck", systemImage: "square.grid.2x2") }
                     } label: {
@@ -66,7 +69,7 @@ struct GameView: View {
             JITHelpView(onClose: { model.showGame = false })
         case .needsRelaunch:
             MessageOverlay(icon: "arrow.clockwise.circle", title: "Restart iDeck",
-                           message: runtime.relaunchReason ?? "Linux has stopped. iPadOS allows the emulator to start once per launch: close iDeck from the app switcher and open it again (enable JIT again first).",
+                           message: runtime.relaunchReason ?? "Linux has stopped. \(Device.os) allows the emulator to start once per launch: close iDeck from the app switcher and open it again (enable JIT again first).",
                            action: ("Back to iDeck", { model.showGame = false }))
         case .failed(let m):
             MessageOverlay(icon: "exclamationmark.triangle", title: "Linux could not start", message: m,
@@ -131,7 +134,7 @@ struct JITHelpView: View {
                 .font(.system(.title2, design: .rounded).weight(.bold)).foregroundStyle(.white)
             Text(runtime.jitProblem)
                 .font(.callout.weight(.semibold)).foregroundStyle(Theme.warning)
-            Text("iDeck emulates an ARM64 PC. iPadOS only allows the emulator's JIT while a debugger (StikDebug) is attached. Without it the emulator is far too slow to run.")
+            Text("iDeck emulates an ARM64 PC. \(Device.os) only allows the emulator's JIT while a debugger (StikDebug) is attached. Without it the emulator is far too slow to run.")
                 .foregroundStyle(Theme.textSecondary)
             HStack(spacing: 12) {
                 Button("Enable JIT with StikDebug") { runtime.requestJIT() }
@@ -148,7 +151,7 @@ struct JITHelpView: View {
                 step(3, "Tap Enable JIT for iDeck, and leave StikDebug running in the background.")
             }
             Text("State: CS_DEBUGGED \(IDPlatform.isDebuggerAttached ? "yes" : "no") · debugger attached \(IDPlatform.isTraced ? "yes" : "no")"
-                 + (IDPlatform.needsTXMJITProtocol ? " · iPadOS 26+ (TXM)" : ""))
+                 + (IDPlatform.needsTXMJITProtocol ? " · \(Device.os) 26+ (TXM)" : ""))
                 .font(.caption.monospaced()).foregroundStyle(Theme.textTertiary)
         }
         .padding(32).frame(maxWidth: 640)
@@ -233,7 +236,11 @@ final class DisplayViewController: UIViewController, UIKeyInput {
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
         let long = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
         long.minimumPressDuration = 0.45
-        [tap, twoTap, pan, pointerDrag, scroll, hover, long].forEach(view.addGestureRecognizer)
+        // Pinch zooms the display (small screens); two fingers then pan it.
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        pinch.delegate = self
+        scroll.delegate = self
+        [tap, twoTap, pan, pointerDrag, scroll, hover, long, pinch].forEach(view.addGestureRecognizer)
         tap.require(toFail: twoTap)
 
         mouseObserver = NotificationCenter.default.addObserver(forName: .GCMouseDidConnect, object: nil, queue: .main) {
@@ -276,16 +283,32 @@ final class DisplayViewController: UIViewController, UIKeyInput {
 
     override var canBecomeFirstResponder: Bool { true }
 
-    /// Maps a point in the view to guest framebuffer pixels (aspect fit).
+    /// Maps a point in the view to guest framebuffer pixels (aspect fit,
+    /// zoom and pan).
     private func guestPoint(_ p: CGPoint) -> CGPoint {
-        let g = spice.displaySize
-        let v = view.bounds.size
-        guard g.width > 0, g.height > 0, v.width > 0 else { return .zero }
-        let scale = min(v.width / g.width, v.height / g.height)
-        let ox = (v.width - g.width * scale) / 2
-        let oy = (v.height - g.height * scale) / 2
-        return CGPoint(x: min(max(0, (p.x - ox) / scale), g.width - 1), y: min(max(0, (p.y - oy) / scale), g.height - 1))
+        spice.guestPoint(forViewPoint: p)
     }
+
+    private var pinching = false
+    private var lastPinchCentre: CGPoint = .zero
+
+    @objc private func pinched(_ r: UIPinchGestureRecognizer) {
+        let c = r.location(in: view)
+        switch r.state {
+        case .began:
+            pinching = true
+            lastPinchCentre = c
+        case .changed:
+            spice.zoom(by: r.scale, around: c)
+            r.scale = 1
+            spice.pan(by: CGPoint(x: c.x - lastPinchCentre.x, y: c.y - lastPinchCentre.y))
+            lastPinchCentre = c
+        default:
+            pinching = false
+        }
+    }
+
+    private var lastTwoFingerPan: CGPoint = .zero
 
     @objc private func tapped(_ r: UITapGestureRecognizer) {
         let p = guestPoint(r.location(in: view))
@@ -336,6 +359,17 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     private var lastScrollY: CGFloat = 0
 
     @objc private func scrolled(_ r: UIPanGestureRecognizer) {
+        // Two fingers on a zoomed display move the view instead of scrolling
+        // (a trackpad's two-finger scroll has no touches and still scrolls).
+        if r.state == .began { lastTwoFingerPan = .zero }
+        let twoFingers = r.minimumNumberOfTouches >= 2 && r.numberOfTouches >= 2
+        if twoFingers && (pinching || spice.zoom > 1) {
+            let t = r.translation(in: view)
+            // While pinching, the pinch moves the view with its centre.
+            if !pinching { spice.pan(by: CGPoint(x: t.x - lastTwoFingerPan.x, y: t.y - lastTwoFingerPan.y)) }
+            lastTwoFingerPan = t
+            return
+        }
         switch r.state {
         case .began:
             lastScrollY = 0
@@ -470,5 +504,15 @@ final class DisplayViewController: UIViewController, UIKeyInput {
             "^": (0x23, true), "&": (0x24, true), "*": (0x25, true), "(": (0x26, true), ")": (0x27, true),
         ]
         return table[ch]
+    }
+}
+
+extension DisplayViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        // Pinch and the two-finger pan run together so a pinch can also move
+        // the zoomed view.
+        (g is UIPinchGestureRecognizer && other is UIPanGestureRecognizer)
+            || (g is UIPanGestureRecognizer && other is UIPinchGestureRecognizer)
     }
 }

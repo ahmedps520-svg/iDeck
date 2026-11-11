@@ -78,6 +78,7 @@ struct MemoryInputs: Codable {
     var userGuestMb: UInt64
     var cpus: Int
     var vulkan: Bool
+    var ramFile: Bool
 }
 
 struct PressureActions: Codable {

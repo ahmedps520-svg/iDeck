@@ -23,7 +23,7 @@ struct SetupView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("iDeck").font(.system(size: 52, weight: .heavy, design: .rounded))
                         .foregroundStyle(Theme.accentGradient)
-                    Text("Steam on your iPad, running locally.")
+                    Text("Steam on your \(Device.name), running locally.")
                         .font(.system(.title2, design: .rounded).weight(.semibold)).foregroundStyle(.white)
                     Text("Setup downloads a small Linux system, verifies it, installs Steam and checks graphics, audio and controllers. You only need to sign in to Steam.")
                         .foregroundStyle(Theme.textSecondary).frame(maxWidth: 640, alignment: .leading)

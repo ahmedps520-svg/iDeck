@@ -46,7 +46,7 @@ struct DiagnosticsPanel: View {
                     .tint(Theme.warning)
                 logBox("Linux console", runtime.consoleTail, empty: "No output yet. The kernel has not printed anything.")
                 logBox("QEMU", runtime.qemuLogTail, empty: "No QEMU messages.")
-                Text("Logs are also in the Files app: On My iPad › iDeck › Logs.")
+                Text("Logs are also in the Files app: On My \(Device.name) › iDeck › Logs.")
                     .font(.caption2).foregroundStyle(Theme.textTertiary)
             }
         }

@@ -90,7 +90,9 @@ struct MainView: View {
     var body: some View {
         if sizeClass == .compact {
             TabView {
-                ForEach([Screen.home, .library, .downloads, .runtime, .settings]) { s in
+                // iPhone: iOS puts the tabs past the fifth under "More", so
+                // Performance, Controls and Storage stay reachable.
+                ForEach([Screen.home, .library, .downloads, .settings, .runtime, .performance, .controls, .storage]) { s in
                     NavigationStack { detail(for: s) }
                         .tabItem { Label(s.title, systemImage: s.icon) }
                 }

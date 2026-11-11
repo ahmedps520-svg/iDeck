@@ -26,6 +26,13 @@ struct MemoryInputs {
     uint64_t user_guest_mb = 0;           // explicit choice in Advanced; 0 = auto
     int cpus = 4;
     bool vulkan = true;
+    // Guest RAM is a shared file mapping (Settings.ramInFile). iOS can write
+    // those pages back to the file and drop them, and does not charge them
+    // to the footprint like anonymous memory: on an M5 iPad the footprint
+    // stayed near 1 GiB with 780 MiB of guest RAM in use. The planner then
+    // charges a quarter of guest RAM to the limit, and instead caps guest RAM
+    // by device RAM, since paging guest memory to flash is slow.
+    bool ram_file = false;
 };
 
 struct MemoryPlan {

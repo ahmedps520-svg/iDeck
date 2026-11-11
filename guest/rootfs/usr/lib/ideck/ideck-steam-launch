@@ -18,6 +18,7 @@ IDECK_STEAM_BETA=0
 IDECK_STEAM_CEF_NOGPU=0
 IDECK_MANGOHUD=0
 IDECK_STEAM_LIGHT=1
+IDECK_STEAM_SMALL=0
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
     . /var/lib/ideck/steam.env
@@ -44,8 +45,25 @@ args=(-noverifyfiles)
 [ "$IDECK_STEAM_BIGPICTURE" = 1 ] && args+=(-gamepadui)
 # Software rendering for the Steam UI (CEF) only; games still use the GPU.
 [ "$IDECK_STEAM_CEF_NOGPU" = 1 ] && args+=(-cef-disable-gpu -cef-disable-gpu-compositing)
-# Fewer web views for the emulated CPU: no Friends list or Chat window.
-[ "$IDECK_STEAM_LIGHT" = 1 ] && args+=(-nofriendsui -nochatui)
+# Fewer web views and processes for the emulated CPU: no Friends list or
+# Chat window, and no Chromium sandbox (its zygote and namespace set-up are
+# extra processes; the whole VM is already isolated from iOS).
+[ "$IDECK_STEAM_LIGHT" = 1 ] && args+=(-nofriendsui -nochatui -no-cef-sandbox)
+# Small Mode: a plain list of games instead of the library and store pages.
+[ "$IDECK_STEAM_SMALL" = 1 ] && args+=(steam://open/minigameslist)
+
+# Steam compiles Vulkan shaders in the background (fossilize_replay). Under
+# emulation that takes all vCPUs away from the Steam UI and games, so those
+# processes are moved to idle priority: they only run when nothing else does.
+if [ "$IDECK_STEAM_LIGHT" = 1 ]; then
+    (
+        while sleep 20; do
+            for pid in $(pgrep -x fossilize_replay 2>/dev/null); do
+                chrt --idle -p 0 "$pid" >/dev/null 2>&1 || renice -n 19 -p "$pid" >/dev/null 2>&1 || true
+            done
+        done
+    ) &
+fi
 
 # In-game FPS / frame-time overlay (MangoHud Vulkan layer; inherited by games).
 if [ "$IDECK_MANGOHUD" = 1 ]; then

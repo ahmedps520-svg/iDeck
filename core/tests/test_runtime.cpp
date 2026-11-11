@@ -180,6 +180,37 @@ TEST("memory: larger limits unlock larger tiers; entitlement gates >4 GiB") {
     CHECK_EQ(tiny.guest_mb, 2048u);
 }
 
+TEST("memory: 8 GB iPhone or iPad Air fits 3 GiB only with file-backed guest RAM") {
+    // iPhone 16 Pro / Pro Max, iPad Air M3: 8 GB, ~7.5 GiB reported.
+    MemoryInputs in;
+    in.physical_mb = 7680;
+    in.app_limit_mb = 3400;
+    in.cpus = 4;
+    MemoryPlan anon = plan_memory(in);
+    CHECK(!anon.fits);   // anonymous guest RAM: not even 2 GiB fits
+    in.ram_file = true;
+    MemoryPlan p = plan_memory(in);
+    CHECK(p.fits);
+    CHECK_EQ(p.guest_mb, 3072u);
+    CHECK(p.guest_mb / 4 + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 3400u);
+    // Device RAM caps the guest even when the limit would allow more.
+    in.app_limit_mb = 6000;
+    in.increased_memory_limit = true;
+    CHECK_EQ(plan_memory(in).guest_mb, 3072u);
+}
+
+TEST("memory: 12 GB devices with file-backed RAM get 4 GiB") {
+    // iPhone 17 Pro / 18 Pro, M4/M5 iPad Pro; measured M5 limit 5120 MiB.
+    MemoryInputs in;
+    in.physical_mb = 12288;
+    in.app_limit_mb = 5120;
+    in.cpus = 4;
+    in.ram_file = true;
+    CHECK_EQ(plan_memory(in).guest_mb, 4096u);
+    in.increased_memory_limit = true;
+    CHECK_EQ(plan_memory(in).guest_mb, 4096u);   // 5 GiB is over the RAM cap
+}
+
 TEST("memory: user override honoured only when it fits") {
     MemoryInputs in;
     in.physical_mb = 12288;

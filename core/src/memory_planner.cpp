@@ -80,13 +80,18 @@ MemoryPlan plan_memory(const MemoryInputs& in) {
     int cpus = in.cpus < 1 ? 1 : in.cpus;
     p.overhead_mb = kAppUiMb + kQemuBaseMb + kPerCpuMb * static_cast<uint64_t>(cpus) + kSafetyMarginMb;
 
+    auto charged_guest = [&](uint64_t guest) { return in.ram_file ? guest / 4 : guest; };
     auto cost = [&](uint64_t guest) {
-        return guest + tb_cache_for(guest) + gpu_budget_for(guest, in.vulkan) + p.overhead_mb;
+        return charged_guest(guest) + tb_cache_for(guest) + gpu_budget_for(guest, in.vulkan) + p.overhead_mb;
     };
+    // File-backed guest RAM still needs device RAM to run at full speed:
+    // at most ~40% of it (8 GB devices: 3 GiB; 12 GB: 4-5 GiB).
+    const uint64_t ram_cap = (in.ram_file && in.physical_mb) ? in.physical_mb * 2 / 5 + 64 : UINT64_MAX;
 
     for (auto tier : guest_memory_tiers()) {
         // 6 GiB is only offered with clear headroom (see product spec).
         if (tier >= 6144 && in.physical_mb < 12288) continue;
+        if (tier > ram_cap) continue;
         if (cost(tier) <= limit) p.allowed_tiers.push_back(tier);
     }
 

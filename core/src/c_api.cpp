@@ -88,6 +88,7 @@ const std::map<std::string, Handler>& handlers() {
              in.user_guest_mb = u64(a, "user_guest_mb");
              in.cpus = static_cast<int>(a["cpus"].as_int(4));
              in.vulkan = a["vulkan"].as_bool(true);
+             in.ram_file = a["ram_file"].as_bool(false);
              return plan_memory(in).to_json();
          }},
         {"memory.pressure",

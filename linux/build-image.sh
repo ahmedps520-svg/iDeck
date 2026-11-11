@@ -80,7 +80,7 @@ echo "==> installing iDeck files"
 cp -a "$HERE/guest/rootfs/." "$ROOT/"
 install -m 0755 "$AGENT" "$ROOT/usr/lib/ideck/ideck-agent"
 install -m 0755 "$BENCH" "$ROOT/usr/lib/ideck/ideck-bench"
-chmod 0755 "$ROOT"/usr/lib/ideck/{ideck-steam-launch,ideck-steam-url,session,set-resolution,init-home} \
+chmod 0755 "$ROOT"/usr/lib/ideck/{ideck-steam-launch,ideck-steam-url,session,set-resolution,init-home,zram-swap} \
            "$ROOT"/usr/lib/ideck/*.py
 echo "$VERSION" > "$ROOT/usr/lib/ideck/runtime-version"
 python3 "$HERE/linux/fex_components.py" "$ROOT/usr/lib/ideck/components.json"
@@ -102,7 +102,7 @@ useradd -m -u 1000 -U -G audio,video,render,input -s /bin/bash deck
 passwd -l root
 passwd -l deck
 systemctl enable ideck-agent.service ideck-home.service ideck-session.service ideck-steam.service \
-    ideck-provision.service ideck-fex-rootfs.service systemd-networkd.service systemd-resolved.service
+    ideck-provision.service ideck-fex-rootfs.service ideck-zram.service systemd-networkd.service systemd-resolved.service
 systemctl set-default graphical.target
 systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer fstrim.timer \
     getty@tty1.service systemd-networkd-wait-online.service

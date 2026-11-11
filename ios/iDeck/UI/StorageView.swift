@@ -13,7 +13,7 @@ struct StorageView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 16) {
-                    StatTile(label: "iPad free", value: Format.bytes(Paths.volumeFreeBytes),
+                    StatTile(label: "\(Device.name) free", value: Format.bytes(Paths.volumeFreeBytes),
                              detail: "of \(Format.bytes(Paths.volumeTotalBytes))")
                     StatTile(label: "Game library", value: Format.bytes(usage.allocated),
                              detail: "on disk · grows up to \(Format.bytes(usage.size)) and beyond as needed")

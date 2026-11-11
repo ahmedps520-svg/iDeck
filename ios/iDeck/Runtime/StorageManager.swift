@@ -104,7 +104,7 @@ enum StorageManager {
 
     static func setExternalFolder(_ url: URL) throws {
         guard url.startAccessingSecurityScopedResource() else {
-            throw Core.CallError(message: "iPadOS denied access to that folder")
+            throw Core.CallError(message: "\(Device.os) denied access to that folder")
         }
         defer { url.stopAccessingSecurityScopedResource() }
         let bookmark = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)

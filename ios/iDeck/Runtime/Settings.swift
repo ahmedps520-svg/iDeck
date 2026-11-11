@@ -12,13 +12,9 @@ struct Settings: Codable, Equatable {
             case .batterySaver: return "Battery Saver"
             }
         }
-        var cpus: Int {
-            switch self {
-            case .balanced: return 4
-            case .performance: return 6
-            case .batterySaver: return 2
-            }
-        }
+        /// Depends on the device's cores (Device.cpus): an iPhone has 2
+        /// performance cores where an M-series iPad has 3-4.
+        var cpus: Int { Device.cpus(for: self) }
     }
 
     enum Resolution: String, Codable, CaseIterable, Identifiable {
@@ -44,10 +40,17 @@ struct Settings: Codable, Equatable {
     var ramInFile = true
     var steamBigPicture = false
     var steamBeta = false
-    var steamSoftwareUI = false            // CEF without GPU (compatibility)
+    /// CEF without GPU. On by default: the only mode in which the Steam
+    /// window has been seen painting on a device (build 21); GPU mode left
+    /// it black.
+    var steamSoftwareUI = true
     /// Skips Steam's Friends and Chat UI (-nofriendsui -nochatui): fewer
     /// web views for the emulated CPU to run. Needs runtime 0.1.6.
     var steamLightweight = true
+    /// Opens Steam's Small Mode (a plain list of installed games) instead
+    /// of the full library and store page: far fewer images and web views.
+    /// On by default on iPhone, where the full UI is also hard to read.
+    var steamSmallMode = Device.isPhone
     var refreshHz = 60
     var audio = true
     var notifications = true

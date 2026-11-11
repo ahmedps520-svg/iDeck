@@ -26,20 +26,17 @@ struct PerformanceView: View {
                              tint: runtime.memory.sample.level == "normal" ? Theme.success : Theme.warning,
                              detail: "Pressure: \(runtime.memory.sample.level)" + (runtime.memory.lastAction.map { " · \($0)" } ?? ""))
                     StatTile(label: "Thermal", value: thermal.0, tint: thermal.1,
-                             detail: "iPadOS thermal state (exact temperatures are not exposed to apps)")
+                             detail: "\(Device.os) thermal state (exact temperatures are not exposed to apps)")
                     StatTile(label: "Battery", value: batteryText, detail: drainText)
                 }
                 Card {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Frame rate").font(.headline).foregroundStyle(.white)
-                        Text("Game FPS and frame time are measured inside Linux by MangoHud and drawn over the game. GPU utilisation is not exposed by iPadOS, so iDeck does not show an estimate.")
+                        Text("Game FPS and frame time are measured inside Linux by MangoHud and drawn over the game. GPU utilisation is not exposed by \(Device.os), so iDeck does not show an estimate.")
                             .font(.callout).foregroundStyle(Theme.textSecondary)
                         Toggle("Show FPS overlay in games (MangoHud)", isOn: $model.settings.showPerformanceOverlay)
                             .onChange(of: model.settings.showPerformanceOverlay) { _ in
-                                Task { _ = try? await runtime.agent?.request("steam.configure", [
-                                    "bigpicture": model.settings.steamBigPicture, "beta": model.settings.steamBeta,
-                                    "cef_software": model.settings.steamSoftwareUI, "overlay": model.settings.showPerformanceOverlay,
-                                    "lightweight": model.settings.steamLightweight]) }
+                                Task { await runtime.applySteamSettings() }
                             }
                         Text("Takes effect for games started after Steam restarts.").font(.caption).foregroundStyle(Theme.textTertiary)
                     }

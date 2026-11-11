@@ -1,0 +1,14 @@
+[Unit]
+Description=Compressed swap in RAM for small iDeck guests
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=ideck-session.service ideck-steam.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ideck/zram-swap start
+ExecStop=/usr/lib/ideck/zram-swap stop
+
+[Install]
+WantedBy=multi-user.target

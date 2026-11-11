@@ -55,7 +55,7 @@ struct HomeView: View {
                 Text(runtime.isRunning ? "Steam is ready" : "Ready when you are")
                     .font(.system(size: 38, weight: .bold, design: .rounded)).foregroundStyle(.white)
                 Text(runtime.isRunning ? "Linux is running. Jump back into Steam." :
-                        "Starts Linux on your iPad's M-series chip and opens the Steam client.")
+                        "Starts Linux on your \(Device.name) and opens the Steam client.")
                     .foregroundStyle(Theme.textSecondary)
                 Button {
                     model.startGaming()

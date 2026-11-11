@@ -197,6 +197,7 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_STEAM_CEF_NOGPU=") + (a["cef_software"].as_bool(false) ? "1" : "0") + "\n";
         env += std::string("IDECK_MANGOHUD=") + (a["overlay"].as_bool(false) ? "1" : "0") + "\n";
         env += std::string("IDECK_STEAM_LIGHT=") + (a["lightweight"].as_bool(true) ? "1" : "0") + "\n";
+        env += std::string("IDECK_STEAM_SMALL=") + (a["small_mode"].as_bool(false) ? "1" : "0") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
         // disk survives runtime updates (system disk replacement).
         const std::string paths[] = {std::string(kStateDir) + "/steam.env", "/home/.ideck/steam.env"};

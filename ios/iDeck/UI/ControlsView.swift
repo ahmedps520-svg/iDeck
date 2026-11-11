@@ -10,7 +10,7 @@ struct ControlsView: View {
                 SectionHeader(title: "Controllers", subtitle: "Each controller appears in Linux as an Xbox 360 pad, which Steam Input and SDL support without setup.")
                 if controllers.pads.isEmpty {
                     Card {
-                        Text("No controller connected. Pair an Xbox, PlayStation, Switch Pro or MFi controller in iPadOS Settings › Bluetooth.")
+                        Text("No controller connected. Pair an Xbox, PlayStation, Switch Pro or MFi controller in \(Device.os) Settings › Bluetooth.")
                             .foregroundStyle(Theme.textSecondary)
                     }
                 }

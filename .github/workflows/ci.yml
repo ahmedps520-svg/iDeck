@@ -97,7 +97,8 @@ jobs:
         run: |
           shellcheck -S warning linux/build-image.sh ios/scripts/*.sh tools/ci_apt.sh \
             guest/rootfs/usr/lib/ideck/ideck-steam-launch guest/rootfs/usr/lib/ideck/ideck-steam-url \
-            guest/rootfs/usr/lib/ideck/session guest/rootfs/usr/lib/ideck/set-resolution guest/rootfs/usr/lib/ideck/init-home
+            guest/rootfs/usr/lib/ideck/session guest/rootfs/usr/lib/ideck/set-resolution guest/rootfs/usr/lib/ideck/init-home \
+            guest/rootfs/usr/lib/ideck/zram-swap
       - name: Python syntax
         run: python3 -m py_compile guest/rootfs/usr/lib/ideck/*.py tools/*.py linux/*.py
       - name: systemd units

@@ -42,8 +42,20 @@ struct SettingsView: View {
                     .onChange(of: model.settings.steamBeta) { _ in applySteam() }
                 Toggle("Software-rendered Steam UI (compatibility)", isOn: $model.settings.steamSoftwareUI)
                     .onChange(of: model.settings.steamSoftwareUI) { _ in applySteam() }
-                Toggle("Lightweight Steam (no Friends & Chat window)", isOn: $model.settings.steamLightweight)
+                Toggle("Lightweight Steam (no Friends & Chat, no web sandbox)", isOn: $model.settings.steamLightweight)
                     .onChange(of: model.settings.steamLightweight) { _ in applySteam() }
+                Toggle("Compact library (Steam Small Mode)", isOn: $model.settings.steamSmallMode)
+                    .onChange(of: model.settings.steamSmallMode) { _ in applySteam() }
+                DisclosureGroup("Make Steam lighter (settings inside Steam)") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("These are Steam's own settings; set them once in Steam and they are kept:")
+                        Text("• Settings › Downloads › Shader Pre-Caching: off (it compiles shaders in the background, which is slow under emulation)")
+                        Text("• Settings › Library › Low Performance Mode and Low Bandwidth Mode: on")
+                        Text("• Settings › In Game › Steam Overlay: off")
+                        Text("• Settings › Interface › smooth scrolling and hardware video decoding: off")
+                    }
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                }
                 Toggle("FPS overlay in games (MangoHud)", isOn: $model.settings.showPerformanceOverlay)
             }
             Section("Audio & feedback") {
@@ -56,7 +68,9 @@ struct SettingsView: View {
                 LabeledContent("Core", value: Core.version)
                 LabeledContent("Edition", value: RuntimeController.edition == "jit" ? "Sideload (JIT)" : "TestFlight (interpreter)")
                 LabeledContent("Signing", value: IDPlatform.signingKind)
-                LabeledContent("App group", value: IDPlatform.applicationGroupIdentifier ?? "none")
+                LabeledContent("Device", value: Device.summary)
+                LabeledContent("GPU shared memory", value: RuntimeController.sharedMemory.group != nil ? "app group"
+                               : RuntimeController.sharedMemory.fileFallback ? "file fallback" : "unavailable")
             }
             Section {
                 DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
@@ -66,7 +80,7 @@ struct SettingsView: View {
                         Text("max (all emulated features)").tag("max")
                     }
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
-                    Text("On by default. Keeps Linux's RAM in a file so iPadOS can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
+                    Text("On by default. Keeps Linux's RAM in a file so \(Device.os) can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                     TextField("Runtime manifest URL (https)", text: $manifestURL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()

@@ -207,7 +207,7 @@ final class Installer: ObservableObject {
         let ram = IDPlatform.physicalMemory >> 30
         let model = IDPlatform.modelIdentifier
         guard ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 17, minorVersion: 0, patchVersion: 0)) else {
-            throw Core.CallError(message: "iPadOS 17 or later is required")
+            throw Core.CallError(message: "\(Device.os) 17 or later is required")
         }
         guard ram >= 6 else {
             throw Core.CallError(message: "\(model) has \(ram) GB of memory; iDeck needs at least 8 GB")
