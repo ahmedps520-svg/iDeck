@@ -41,7 +41,8 @@ WORK="$(mktemp -d /var/tmp/ideck-image.XXXXXX)"
 ROOT="$WORK/rootfs"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-trap 'umount -R "$ROOT/proc" "$ROOT/sys" "$ROOT/dev" 2>/dev/null || true' EXIT
+cleanup_mounts() { umount -lR "$ROOT/dev" 2>/dev/null || true; umount -l "$ROOT/sys" "$ROOT/proc" 2>/dev/null || true; }
+trap cleanup_mounts EXIT
 
 if [ -n "$SNAPSHOT" ]; then
     MIRROR="http://snapshot.debian.org/archive/debian/$SNAPSHOT"
@@ -90,8 +91,11 @@ printf '127.0.0.1\tlocalhost\n127.0.1.1\tideck\n' > "$ROOT/etc/hosts"
 echo "en_US.UTF-8 UTF-8" > "$ROOT/etc/locale.gen"
 echo "LANG=en_US.UTF-8" > "$ROOT/etc/default/locale"
 mount -t proc proc "$ROOT/proc"
-mount --rbind /sys "$ROOT/sys"
+# Fresh sysfs rather than a recursive bind of the host's: no cgroup
+# submounts that keep it busy at unmount time.
+mount -t sysfs sysfs "$ROOT/sys"
 mount --rbind /dev "$ROOT/dev"
+mount --make-rslave "$ROOT/dev"
 chroot "$ROOT" /bin/sh -eux <<'CHROOT'
 locale-gen
 useradd -m -u 1000 -U -G audio,video,render,input -s /bin/bash deck
@@ -110,7 +114,7 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /var/cache/apt/*.bin /var/log/*.log /tmp/* /var/tmp/*
 dpkg-query -W -f='${Package} ${Version} ${Architecture}\n' > /usr/lib/ideck/packages.lock
 CHROOT
-umount -R "$ROOT/proc" "$ROOT/sys" "$ROOT/dev"
+cleanup_mounts
 # /home is the separate library disk; keep the mount point empty.
 rm -rf "$ROOT/home/deck"
 mkdir -p "$ROOT/home"
