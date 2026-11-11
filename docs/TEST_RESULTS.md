@@ -133,6 +133,33 @@ Measured from `ideck.log`, `qemu.log` and `console.log` shared from the device:
 | A failed graphics check stopped setup and triggered retries | `vulkan` is an optional check; a step with only optional failures ends as `warning` and setup continues; the automatic retry is only for the download steps; step details are logged |
 | The device stayed on runtime 0.1.1 | the newer-runtime check now runs until setup completes, not only before the first boot |
 
+### Linux runtime 0.1.3 boot test (run 43015376314): Steam install failed on layout
+
+- Boot to agent in 34 s.
+- FEX RootFS mounted (Ubuntu 24.04 EroFS).
+- `steam-libs`: "all client libraries resolve", so the 0.1.2 GTK gap is closed.
+- The full Steam install (34 packages, 996 MB) extracted every package, then failed with `/home/deck/.local/share/Steam/steamrt64 exists and is a directory`. Checked from the published zips:
+  - `steam_steamrt_linuxarm64` ships `steamrt64/steam` as an x86-64 ELF (`e_machine` 0x3e).
+  - `bins_steamrt_linuxarm64` puts x86-64 client libraries in `steamrt64/` and x86 ones in `steamrt32/`.
+  - The bootstrap's `steamrt64 → steamrtarm64` link collided with that real directory.
+- `ideck-steam.service` then re-ran the whole install on every restart: 14 restarts, about 4 min CPU and a 2.4 GB memory peak each.
+- `steam_window_seen` was false.
+- GL, Vulkan (llvmpipe) and audio (`auto_null`) failed as expected on a CI runner with no GPU or sound device.
+
+### Device run, build 16 (iPad17,2, iPadOS 27.2, runtime 0.1.1 → 0.1.2)
+
+- The code signature has **no app group** (`app groups []`; the group in the logs came from the Info.plist fallback). `shm_open("group.com.ideck.app/…")` failed with EPERM, so Vulkan was turned off for the session as designed.
+- Guest RAM was file-backed. The footprint was 610 MiB after QEMU start (857 MiB in build 15) and 1002 MiB with the guest at 514 MiB used. No memory termination in this session.
+- OpenGL: `virgl`, OpenGL 2.1, Mesa 26.1.6.
+- Runtime 0.1.2 still treats Vulkan as required, so `init-graphics` failed and setup stopped. The guest-side change ships in the runtime, not in the app.
+- In the session before that, iDeck was launched with JIT attached, then spent 52 s installing runtime 0.1.2 before starting QEMU. It died with SIGTRAP in `tcg_region_init`: QEMU's `brk #0x69` JIT request was never answered. Boots 1–6 s after StikDebug attached worked.
+
+| Finding | Fix (runtime 0.1.4, build 17) |
+|---|---|
+| `steamrt64` layout collision; a full install over the old link would mix x86-64 files into `steamrtarm64/` | no link and no `.steam-enable-steamrt64-client` flag; an old link is removed together with `steamrtarm64/`, which is reinstalled; extraction refuses to write through symlinks; a complete install requires an AArch64 `steamrtarm64/steam` |
+| Install restarted from scratch on every service restart | a retry keeps the packages already extracted; `ideck-steam.service` waits 20 s between restarts and stops after 4 starts in 15 min |
+| JIT request unanswered after a long gap | QEMU is not started when the debugger attached more than 45 s earlier; iDeck asks for a relaunch with JIT instead of crashing |
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

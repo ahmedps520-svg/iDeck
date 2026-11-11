@@ -66,7 +66,7 @@ struct GameView: View {
             JITHelpView(onClose: { model.showGame = false })
         case .needsRelaunch:
             MessageOverlay(icon: "arrow.clockwise.circle", title: "Restart iDeck",
-                           message: "Linux has stopped. iPadOS allows the emulator to start once per launch: close iDeck from the app switcher and open it again (enable JIT again first).",
+                           message: runtime.relaunchReason ?? "Linux has stopped. iPadOS allows the emulator to start once per launch: close iDeck from the app switcher and open it again (enable JIT again first).",
                            action: ("Back to iDeck", { model.showGame = false }))
         case .failed(let m):
             MessageOverlay(icon: "exclamationmark.triangle", title: "Linux could not start", message: m,

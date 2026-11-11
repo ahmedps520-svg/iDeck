@@ -156,6 +156,25 @@ final class RuntimeController: ObservableObject {
     @Published private(set) var jitReadyEvent = 0
     private var jitRequestPending = false
 
+    /// When this process was first seen with the debugger attached.
+    private(set) var jitAttachedAt: Date? = IDPlatform.isTraced ? Date() : nil
+    /// Why Linux needs a fresh launch of iDeck (shown instead of the generic text).
+    @Published private(set) var relaunchReason: String?
+    /// On device (build 16): JIT attached at launch, then a 50 s runtime
+    /// download; QEMU's first `brk #0x69` was never answered and iDeck died
+    /// with SIGTRAP in tcg_region_init. Boots 1-6 s after attaching worked.
+    /// StikDebug is most likely suspended once it has been in the background
+    /// for a while, so an old attachment is not trusted.
+    static let jitFreshSeconds: TimeInterval = 45
+
+    /// The debugger attached so long ago that StikDebug may no longer answer
+    /// QEMU's JIT request.
+    var jitIsStale: Bool {
+        guard RuntimeController.edition == "jit", IDPlatform.needsTXMJITProtocol, IDPlatform.isTraced,
+              let at = jitAttachedAt else { return false }
+        return Date().timeIntervalSince(at) > RuntimeController.jitFreshSeconds
+    }
+
     /// Asks StikDebug to attach to this process with legacy.js (StikDebug's
     /// documented enable-jit URL). StikDebug asks the user to confirm, then
     /// returns to iDeck.
@@ -196,6 +215,14 @@ final class RuntimeController: ObservableObject {
         }
         guard jitAvailable else {
             phase = .needsJIT
+            return
+        }
+        if jitIsStale {
+            let age = Int(Date().timeIntervalSince(jitAttachedAt ?? Date()))
+            DiagLog.write("jit: debugger attached \(age) s ago; not starting QEMU (its JIT request would go unanswered)")
+            relaunchReason = "JIT was enabled \(age) seconds ago, and StikDebug stops answering after a while in the background. "
+                + "Close iDeck from the app switcher, enable JIT again in StikDebug, and Linux starts right away."
+            phase = .needsRelaunch
             return
         }
         do {
@@ -498,6 +525,7 @@ final class RuntimeController: ObservableObject {
             DiagLog.write("foreground: CS_DEBUGGED \(IDPlatform.isDebuggerAttached) traced \(IDPlatform.isTraced)")
             if jitAvailable {
                 jitRequestPending = false
+                jitAttachedAt = Date()
                 if phase == .needsJIT { phase = .stopped }
                 jitReadyEvent += 1
             }

@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import stat
 import sys
 import time
@@ -45,6 +46,10 @@ MINIMAL_PACKAGES = ("steam_linuxarm64", "bins_linuxarm64_linuxarm64")
 # fetches the rest (CEF/libcef.so, SDL3, codecs), so its UI cannot load.
 # Seen in the runtime 0.1.2 boot test. Android (Lepton) is skipped.
 SKIP_IN_FULL = ("bins_androidarm64_linuxarm64",)
+# ELF e_machine of the native client. The linuxarm64 manifest also ships
+# x86-64 files in steamrt64/ and x86 files in steamrt32/ (the client side of
+# steamclient.so for x86 games run through FEX); steamrt64/steam is x86-64.
+EM_AARCH64 = 0xB7
 
 
 class BootstrapError(RuntimeError):
@@ -227,7 +232,8 @@ def _is_executable_content(head: bytes, name: str) -> bool:
 
 
 def extract(zip_path: Path, root: Path) -> int:
-    """Extracts safely (no absolute paths or '..'); restores exec bits."""
+    """Extracts safely (no absolute paths, '..' or writing through a
+    symlinked directory); restores exec bits."""
     count = 0
     root = root.resolve()
     with zipfile.ZipFile(zip_path) as z:
@@ -235,6 +241,14 @@ def extract(zip_path: Path, root: Path) -> int:
             target = (root / info.filename).resolve()
             if root != target and root not in target.parents:
                 raise BootstrapError(f"unsafe path in {zip_path.name}: {info.filename}")
+            # A symlink on the way would redirect the files somewhere else in
+            # the tree (old layouts linked steamrt64 -> steamrtarm64, which
+            # put x86-64 files over the ARM64 client).
+            here = root
+            for part in Path(info.filename).parts[:-1]:
+                here = here / part
+                if here.is_symlink():
+                    raise BootstrapError(f"{zip_path.name}: {info.filename} would be written through the symlink {here}")
             if info.is_dir():
                 target.mkdir(parents=True, exist_ok=True)
                 continue
@@ -266,6 +280,22 @@ def _symlink(target: str | Path, link: Path) -> None:
     os.symlink(str(target), link)
 
 
+def drop_legacy_layout(steam_root: Path) -> bool:
+    """Runtimes up to 0.1.3 linked steamrt64 -> steamrtarm64. Extracting the
+    full package set through that link mixes x86-64 files into the ARM64
+    client, so the link goes and steamrtarm64 is reinstalled from scratch.
+    Returns True when something was removed."""
+    link = steam_root / "steamrt64"
+    if not link.is_symlink():
+        return False
+    link.unlink()
+    arm = steam_root / "steamrtarm64"
+    if arm.is_dir() and not arm.is_symlink():
+        shutil.rmtree(arm)
+    emit("legacy-layout-removed", path=str(link))
+    return True
+
+
 def configure(steam_root: Path, home: Path, beta: bool) -> None:
     """Creates the layout the ARM64 client expects (see STEAM.md)."""
     (steam_root / "package").mkdir(parents=True, exist_ok=True)
@@ -274,20 +304,37 @@ def configure(steam_root: Path, home: Path, beta: bool) -> None:
         beta_file.write_text("publicbeta\n")
     elif beta_file.exists():
         beta_file.unlink()
-    # steam.sh launches $STEAMROOT/steamrt64/steam when this flag exists.
-    (steam_root / ".steam-enable-steamrt64-client").touch()
-    _symlink("steamrtarm64", steam_root / "steamrt64")
+    # ideck-steam-launch starts steamrtarm64/steam directly. steam.sh would
+    # start steamrt64/steam (x86-64) when this flag exists, so it must not.
+    flag = steam_root / ".steam-enable-steamrt64-client"
+    if flag.exists():
+        flag.unlink()
+    drop_legacy_layout(steam_root)
     dot = home / ".steam"
     _symlink(steam_root, dot / "steam")
     _symlink(steam_root, dot / "root")
     _symlink(steam_root / "linuxarm64", dot / "sdkarm64")
 
 
+def elf_machine(path: Path) -> int | None:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(20)
+    except OSError:
+        return None
+    if len(head) < 20 or head[:4] != b"\x7fELF":
+        return None
+    return int.from_bytes(head[18:20], "little" if head[5] == 1 else "big")
+
+
 def is_installed(steam_root: Path, state_path: Path | None = None) -> bool:
-    """Client binary present and, if a state file is given, a completed
-    *full* install recorded there (a minimal install is not usable)."""
+    """Native client binary present and, if a state file is given, a
+    completed *full* install recorded there (a minimal install is not
+    usable)."""
     exe = steam_root / "steamrtarm64" / "steam"
-    if not (exe.is_file() and os.access(exe, os.X_OK)):
+    if not (exe.is_file() and os.access(exe, os.X_OK)) or elf_machine(exe) != EM_AARCH64:
+        return False
+    if (steam_root / "steamrt64").is_symlink():
         return False
     if state_path is None:
         return True
@@ -322,14 +369,33 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
     names = select_packages(pkgs, full)
     total = sum(int(pkgs[n]["size"]) for n in names)
     emit("plan", version=version, packages=names, bytes=total)
+    previous = {}
+    if state_path and state_path.exists():
+        try:
+            previous = json.loads(state_path.read_text())
+        except ValueError:
+            previous = {}
+    steam_root.mkdir(parents=True, exist_ok=True)
+    if drop_legacy_layout(steam_root):
+        previous = {}  # the tree changed under the recorded packages
     state = {"schema": STATE_VERSION, "platform": PLATFORM, "channel": channel, "version": version,
              "mode": "full" if full else "minimal",
              "packages": {}, "status": "installing", "updated": int(time.time())}
     if state_path:
         write_state(state_path, state)
-    steam_root.mkdir(parents=True, exist_ok=True)
+    # A retry after a failure resumes: the leading packages the last run of
+    # the same client version already extracted are kept. Only a prefix in
+    # install order, so files shared between packages end up the same.
+    done_before = previous.get("packages", {}) if previous.get("version") == version else {}
+    resuming = True
     for n in names:
         p = pkgs[n]
+        prev = done_before.get(n, {})
+        if resuming and prev.get("file") == p["file"] and prev.get("sha256") == p["sha2"]:
+            state["packages"][n] = prev
+            emit("already-installed", package=n)
+            continue
+        resuming = False
         z = cache / p["file"]
         download(f"{CDN}/{p['file']}", z, int(p["size"]), p["sha2"], opener=opener)
         files = extract(z, steam_root)
@@ -339,7 +405,7 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
             write_state(state_path, state)
     configure(steam_root, home, beta)
     if not is_installed(steam_root):  # binary check; state is written below
-        raise BootstrapError("client binary steamrtarm64/steam missing after install")
+        raise BootstrapError("ARM64 client binary steamrtarm64/steam missing or not aarch64 after install")
     state["status"] = "installed"
     state["updated"] = int(time.time())
     if state_path:

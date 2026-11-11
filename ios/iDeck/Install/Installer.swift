@@ -424,7 +424,8 @@ final class Installer: ObservableObject {
                 needsJIT = true
                 throw WaitForUser(message: "Enable JIT, then continue setup")
             case .needsRelaunch:
-                throw WaitForUser(message: "Close iDeck from the app switcher and open it again to continue")
+                throw WaitForUser(message: runtime.relaunchReason
+                                  ?? "Close iDeck from the app switcher and open it again to continue")
             case .notInstalled:
                 throw Core.CallError(message: "The runtime files are missing. Use Repair Setup to reinstall them.")
             case .booting(let s), .starting(let s):

@@ -15,10 +15,10 @@ Facts checked on 2026-11-11:
 ## Bootstrap (`guest/rootfs/usr/lib/ideck/steam_bootstrap.py`)
 
 1. Fetch the manifest and parse KeyValues (with a tested parser).
-2. Install `steam_linuxarm64` (bootstrapper) and `bins_linuxarm64_linuxarm64` (client).
-3. Download each over HTTPS with Range resume, check the size and SHA-256 from the manifest, and reject zip entries that escape the Steam root.
+2. Install the full package set (34 packages, about 1 GB; only the Android package is skipped). The bootstrapper `steam_linuxarm64` goes first and `bins_linuxarm64_linuxarm64` (client binaries) last. With only those two, the client reported "Nothing to do" and never fetched CEF, SDL3 or the codecs (runtime 0.1.2 boot test).
+3. Download each over HTTPS with Range resume, check the size and SHA-256 from the manifest, and reject zip entries that escape the Steam root or would be written through a symlink. A retry keeps the packages the failed run already extracted (same client version, in install order).
 4. Restore exec bits for ELF files and scripts.
-5. Recreate the layout the client expects: `steamrt64 → steamrtarm64`, `.steam-enable-steamrt64-client`, and `~/.steam/{steam,root,sdkarm64}`.
+5. Create `~/.steam/{steam,root,sdkarm64}`. The ARM64 client lives in `steamrtarm64/`. The same manifest also ships `steamrt64/` (x86-64: `steamrt64/steam` is an x86-64 ELF, checked from the package) and `steamrt32/` (x86), the client side of `steamclient.so` for x86 games under FEX. Runtimes up to 0.1.3 linked `steamrt64 → steamrtarm64` and set `.steam-enable-steamrt64-client`. A full install then failed ("steamrt64 exists and is a directory", runtime 0.1.3 boot test), and over an existing link it would have written x86-64 files into `steamrtarm64/`. The bootstrap now removes such a link together with `steamrtarm64/` (reinstalled from the packages) and removes the flag, because `steam.sh` would then start the x86-64 `steamrt64/steam`. A full install counts as complete only when `steamrtarm64/steam` is an AArch64 ELF.
 6. Launch `LD_LIBRARY_PATH=$STEAMROOT/steamrtarm64 $STEAMROOT/steamrtarm64/steam -noverifyfiles` (the published community recipe). On first start the client updates the remaining packages itself, verified by Valve's own updater.
 
 Optional switches (Settings): Big Picture (`-gamepadui`), public beta, and

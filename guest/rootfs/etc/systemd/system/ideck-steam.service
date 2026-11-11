@@ -3,6 +3,10 @@ Description=Steam (native ARM64 client) for iDeck
 After=ideck-session.service network-online.target ideck-provision.service
 Wants=network-online.target
 Requires=ideck-session.service
+# A failed install is retried a few times, then left for the app (Restart
+# Steam / Repair Setup): every attempt costs minutes of CPU in the VM.
+StartLimitIntervalSec=900
+StartLimitBurst=4
 
 [Service]
 User=deck
@@ -11,7 +15,7 @@ Type=simple
 ExecStart=/usr/lib/ideck/ideck-steam-launch
 # Steam exits normally when the user quits it; the app offers to restart.
 Restart=on-failure
-RestartSec=5
+RestartSec=20
 TimeoutStopSec=30
 KillMode=mixed
 LimitNOFILE=524288
