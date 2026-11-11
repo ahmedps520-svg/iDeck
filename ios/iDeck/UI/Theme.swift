@@ -46,8 +46,8 @@ struct SectionHeader: View {
 struct StatTile: View {
     var label: String
     var value: String
-    var detail: String?
     var tint: Color = Theme.accent
+    var detail: String?
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label.uppercased()).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(Theme.textTertiary)

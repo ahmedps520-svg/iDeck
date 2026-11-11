@@ -37,22 +37,22 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 - (BOOL)connect;
 - (void)disconnect;
 
-- (void)attachToView:(MTKView *)view;
+- (void)attachToView:(MTKView *)view NS_SWIFT_NAME(attach(to:));
 - (void)detachFromView;
 /// Asks the guest (spice-vdagent) to change resolution.
-- (void)requestResolution:(CGSize)size;
+- (void)requestResolution:(CGSize)size NS_SWIFT_NAME(requestResolution(_:));
 
 /// `usage` is a USB HID keyboard usage (UIKeyboardHIDUsage).
-- (void)sendKeyUsage:(NSInteger)usage pressed:(BOOL)pressed;
+- (void)sendKeyUsage:(NSInteger)usage pressed:(BOOL)pressed NS_SWIFT_NAME(sendKeyUsage(_:pressed:));
 - (void)releaseAllKeys;
 /// Absolute position in guest display pixels (touch / pointer).
-- (void)sendMouseAbsolute:(CGPoint)point buttons:(IDMouseButton)buttons;
+- (void)sendMouseAbsolute:(CGPoint)point buttons:(IDMouseButton)buttons NS_SWIFT_NAME(sendMouseAbsolute(_:buttons:));
 /// Relative motion (captured mouse for games).
-- (void)sendMouseRelative:(CGPoint)delta buttons:(IDMouseButton)buttons;
-- (void)sendMouseButton:(IDMouseButton)button pressed:(BOOL)pressed buttons:(IDMouseButton)buttons;
-- (void)sendScroll:(CGFloat)dy buttons:(IDMouseButton)buttons;
+- (void)sendMouseRelative:(CGPoint)delta buttons:(IDMouseButton)buttons NS_SWIFT_NAME(sendMouseRelative(_:buttons:));
+- (void)sendMouseButton:(IDMouseButton)button pressed:(BOOL)pressed buttons:(IDMouseButton)buttons NS_SWIFT_NAME(sendMouseButton(_:pressed:buttons:));
+- (void)sendScroll:(CGFloat)dy buttons:(IDMouseButton)buttons NS_SWIFT_NAME(sendScroll(_:buttons:));
 /// YES: relative (server) mouse mode for games; NO: absolute (client).
-- (void)requestRelativeMouse:(BOOL)relative;
+- (void)requestRelativeMouse:(BOOL)relative NS_SWIFT_NAME(requestRelativeMouse(_:));
 @property (nonatomic, readonly) BOOL relativeMouseMode;
 
 @end
