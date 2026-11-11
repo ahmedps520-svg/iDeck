@@ -4,3 +4,4 @@
 #import "IDQemuLauncher.h"
 #import "IDSpiceClient.h"
 #import "IDCrashLog.h"
+#include "IDSharedMemoryFallback.h"

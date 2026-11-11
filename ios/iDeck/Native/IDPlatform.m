@@ -1,4 +1,7 @@
 #import "IDPlatform.h"
+#import "IDSharedMemoryFallback.h"
+
+#import <Metal/Metal.h>
 
 #import <arpa/inet.h>
 #import <errno.h>
@@ -178,8 +181,99 @@ static NSString *IDFirstGroup(NSDictionary *entitlements) {
     return problem;
 }
 
+static BOOL IDEntitled(NSString *key) {
+    // The signature is what the kernel enforces; a sideloading tool can sign
+    // with fewer entitlements than the profile lists.
+    NSDictionary *signed_ = [IDPlatform signedEntitlements];
+    if (signed_) return [signed_[key] boolValue];
+    return [[IDPlatform provisionedEntitlements][key] boolValue];
+}
+
 + (BOOL)hasIncreasedMemoryLimit {
-    return [[self provisionedEntitlements][@"com.apple.developer.kernel.increased-memory-limit"] boolValue];
+    return IDEntitled(@"com.apple.developer.kernel.increased-memory-limit");
+}
+
++ (BOOL)hasExtendedVirtualAddressing {
+    return IDEntitled(@"com.apple.developer.kernel.extended-virtual-addressing");
+}
+
+static NSInteger IDSysctlInt(const char *name) {
+    int value = 0;
+    size_t size = sizeof(value);
+    if (sysctlbyname(name, &value, &size, NULL, 0) != 0) return 0;
+    return value;
+}
+
++ (NSInteger)performanceCores {
+    return IDSysctlInt("hw.perflevel0.physicalcpu");
+}
+
++ (NSInteger)efficiencyCores {
+    return IDSysctlInt("hw.perflevel1.physicalcpu");
+}
+
+// GPU copy out of and fill into `region` (page aligned, `size` a page
+// multiple). nil on success.
+static NSString *IDMetalRoundTrip(id<MTLDevice> device, void *region, size_t size) {
+    uint32_t *words = region;
+    const size_t n = size / sizeof(uint32_t);
+    for (size_t i = 0; i < n; i++) words[i] = (uint32_t)(i * 2654435761u);
+    id<MTLBuffer> host = [device newBufferWithBytesNoCopy:region length:size
+                                                 options:MTLResourceStorageModeShared deallocator:nil];
+    if (!host) return @"Metal refused to wrap file-backed memory (newBufferWithBytesNoCopy returned nil)";
+    id<MTLBuffer> copy = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
+    id<MTLCommandQueue> queue = [device newCommandQueue];
+    id<MTLCommandBuffer> cb = [queue commandBuffer];
+    if (!copy || !cb) return @"could not create Metal objects for the check";
+    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+    [blit copyFromBuffer:host sourceOffset:0 toBuffer:copy destinationOffset:0 size:size];
+    [blit endEncoding];
+    blit = [cb blitCommandEncoder];   // separate pass: ordered after the copy
+    [blit fillBuffer:host range:NSMakeRange(0, 4096) value:0xA5];
+    [blit endEncoding];
+    [cb commit];
+    [cb waitUntilCompleted];
+    if (cb.status != MTLCommandBufferStatusCompleted) {
+        return [NSString stringWithFormat:@"GPU work on file-backed memory failed: %@",
+                cb.error.localizedDescription ?: @"unknown error"];
+    }
+    const uint32_t *out = copy.contents;
+    for (size_t i = 0; i < n; i += 61) {
+        if (out[i] != (uint32_t)(i * 2654435761u)) return @"the GPU read wrong data from file-backed memory";
+    }
+    if (out[n - 1] != (uint32_t)((n - 1) * 2654435761u)) return @"the GPU read wrong data from file-backed memory";
+    const uint8_t *bytes = region;
+    for (size_t i = 0; i < 4096; i++) {
+        if (bytes[i] != 0xA5) return @"a GPU write into file-backed memory is not visible to the CPU";
+    }
+    return nil;
+}
+
++ (NSString *)fileBackedGPUMemoryProblem {
+    @autoreleasepool {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (!device) return @"no Metal device";
+        const size_t size = 1u << 20;
+        char name[48];
+        snprintf(name, sizeof name, "ideck-metal/%x", arc4random());
+        int fd = id_shm_fallback_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
+        if (fd < 0) return [NSString stringWithFormat:@"could not create a file-backed region: %s", strerror(errno)];
+        id_shm_fallback_unlink(name);
+        NSString *problem = nil;
+        if (ftruncate(fd, (off_t)size) != 0) {
+            problem = [NSString stringWithFormat:@"ftruncate failed: %s", strerror(errno)];
+        } else {
+            void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            if (p == MAP_FAILED) {
+                problem = [NSString stringWithFormat:@"mmap failed: %s", strerror(errno)];
+            } else {
+                problem = IDMetalRoundTrip(device, p, size);
+                munmap(p, size);
+            }
+        }
+        close(fd);
+        return problem;
+    }
 }
 
 + (NSString *)signingKind {

@@ -231,7 +231,10 @@ final class Installer: ObservableObject {
         } else {
             parts.append(IDPlatform.isDebuggerAttached ? "JIT: enabled" : "JIT: not enabled yet (needed to start Linux)")
         }
-        parts.append(IDPlatform.applicationGroupIdentifier != nil ? "App group: present" : "App group: missing (Vulkan unavailable)")
+        let shm = RuntimeController.sharedMemory
+        parts.append(shm.group != nil ? "GPU shared memory: app group"
+                     : shm.fileFallback ? "GPU shared memory: file fallback (no app group)"
+                     : "GPU shared memory: unavailable (Vulkan off)")
         parts.append(IDPlatform.hasIncreasedMemoryLimit ? "Increased memory limit: yes" : "Increased memory limit: no")
         update("check-distribution", detail: parts.joined(separator: " · "))
     }

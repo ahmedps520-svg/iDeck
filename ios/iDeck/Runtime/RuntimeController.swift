@@ -61,20 +61,30 @@ final class RuntimeController: ObservableObject {
     private let spiceEvents = SpiceEventLog()
     private var lastDisplaySummary = ""
     private var displaySummaryLoggedAt = Date.distantPast
+    private var lastSharedMemoryStats = ""
     private var observers: [NSObjectProtocol] = []
 
     /// "jit" for the sideload edition, "se" for the interpreter (TestFlight) edition.
     static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
 
     /// Venus (Vulkan) blob memory is POSIX shared memory named under an app
-    /// group (UTM's virglrenderer, anon_file.c); iPadOS refuses the name
-    /// unless the code signature carries that group. Tried once per launch:
-    /// the first group that works, or why none does.
+    /// group (UTM's virglrenderer, anon_file.c); iOS refuses the name unless
+    /// the code signature carries that group, and free Apple ID signing drops
+    /// app groups. Then the embedded frameworks' shm_open() is served from
+    /// unlinked files in tmp/ (IDSharedMemoryFallback), checked here with the
+    /// same call sequence and with a Metal round trip. Decided once per
+    /// launch, before QEMU is loaded.
     struct SharedMemoryCheck {
         var group: String?
+        /// Why POSIX shared memory itself is unavailable (nil when it works).
+        var shmProblem: String?
+        /// Files stand in for shared memory.
+        var fileFallback = false
+        /// Why Venus cannot get blob memory at all; nil when it can.
         var problem: String?
         var summary: String {
             if let group { return "ok under \(group)" }
+            if fileFallback { return "file-backed fallback (POSIX shared memory refused: \(shmProblem ?? "unknown"))" }
             return "unavailable (\(problem ?? "unknown"))"
         }
     }
@@ -85,12 +95,37 @@ final class RuntimeController: ObservableObject {
             if let problem = IDPlatform.sharedMemoryProblem(forGroup: group) {
                 problems.append(problem)
             } else {
-                return SharedMemoryCheck(group: group, problem: nil)
+                return SharedMemoryCheck(group: group)
             }
         }
-        return SharedMemoryCheck(group: nil, problem: problems.isEmpty ? "no app group in the signing profile"
-                                                                       : problems.joined(separator: "; "))
+        let shmProblem = problems.isEmpty ? "no app group in the signing profile" : problems.joined(separator: "; ")
+        // Only this app's frameworks (QEMU, virglrenderer, SPICE) are pointed
+        // at the stand-in; the app binary keeps the real call for the probe.
+        let frameworks = (Bundle.main.privateFrameworksPath ?? Bundle.main.bundlePath + "/Frameworks") + "/"
+        guard id_shm_fallback_install(Paths.gpuSharedMemory.path, frameworks, IDShmFallbackWhenDenied) == 0 else {
+            let why = String(cString: strerror(errno))
+            return SharedMemoryCheck(shmProblem: shmProblem, problem: "\(shmProblem); file fallback not installed: \(why)")
+        }
+        var err = [CChar](repeating: 0, count: 256)
+        if id_shm_fallback_selftest(1 << 20, &err, err.count) != 0 {
+            return SharedMemoryCheck(shmProblem: shmProblem,
+                                     problem: "\(shmProblem); file fallback failed: \(String(cString: err))")
+        }
+        if let metal = IDPlatform.fileBackedGPUMemoryProblem() {
+            return SharedMemoryCheck(shmProblem: shmProblem, problem: "\(shmProblem); file fallback: \(metal)")
+        }
+        return SharedMemoryCheck(shmProblem: shmProblem, fileFallback: true)
     }()
+
+    /// One line for the log: what the shm stand-in has done so far.
+    static var sharedMemoryStats: String {
+        var st = IDShmFallbackStats()
+        id_shm_fallback_get_stats(&st)
+        return "\(st.images_patched) images / \(st.slots_patched) imports redirected"
+            + (st.patch_failures > 0 ? " (\(st.patch_failures) failed)" : "")
+            + ", \(st.file_opens) of \(st.opens) allocations file-backed"
+            + (st.file_failures > 0 ? ", \(st.file_failures) failed" : "")
+    }
 
     init() {
         IDCrashLog.install(withPath: Paths.crashLog.path)
@@ -99,7 +134,10 @@ final class RuntimeController: ObservableObject {
                       + "edition \(RuntimeController.edition), signing \(IDPlatform.signingKind), "
                       + "CS_DEBUGGED \(IDPlatform.isDebuggerAttached), traced \(IDPlatform.isTraced), "
                       + "app group \(IDPlatform.applicationGroupIdentifier ?? "none") (\(IDPlatform.applicationGroupSource)), "
-                      + "available \(IDPlatform.availableMemory >> 20) MiB, footprint \(IDPlatform.physFootprint >> 20) MiB")
+                      + "available \(IDPlatform.availableMemory >> 20) MiB, footprint \(IDPlatform.physFootprint >> 20) MiB, "
+                      + "RAM \(IDPlatform.physicalMemory >> 20) MiB, cores \(IDPlatform.performanceCores)P+\(IDPlatform.efficiencyCores)E, "
+                      + "increased-memory-limit \(IDPlatform.hasIncreasedMemoryLimit), "
+                      + "extended-virtual-addressing \(IDPlatform.hasExtendedVirtualAddressing)")
         DiagLog.write("signature: app groups \((IDPlatform.signedEntitlements?["com.apple.security.application-groups"] as? [String]) ?? []), "
                       + "candidates \(IDPlatform.applicationGroupCandidates), GPU shared memory \(RuntimeController.sharedMemory.summary)")
         refreshInstalledState()
@@ -268,6 +306,13 @@ final class RuntimeController: ObservableObject {
         }
         if tailTicks % 30 == 0, case .running = phase {
             Task { await captureGuestLogs() }
+            if RuntimeController.sharedMemory.fileFallback {
+                let stats = RuntimeController.sharedMemoryStats
+                if stats != lastSharedMemoryStats {
+                    DiagLog.write("gpu shm: \(stats)")
+                    lastSharedMemoryStats = stats
+                }
+            }
         }
         if tailTicks % 5 == 0 && (isRunning || phase == .stopping) {
             DiagLog.write("mem: footprint \(IDPlatform.physFootprint >> 20) MiB, available \(IDPlatform.availableMemory >> 20) MiB, "
@@ -325,12 +370,14 @@ final class RuntimeController: ObservableObject {
                            inputSocket: Paths.inputSocket.path, consoleLog: Paths.consoleLog.path)
         cfg.vulkan = s.vulkan && !s.safeGraphics
         if cfg.vulkan, let problem = RuntimeController.sharedMemory.problem {
-            // Without shared memory every Venus blob fails (virtio-gpu
+            // Without blob memory every Venus blob fails (virtio-gpu
             // RESOURCE_CREATE_BLOB -> ERR_UNSPEC) and Vulkan programs in Linux
             // only error out; OpenGL (VirGL over ANGLE/Metal) needs no blobs.
             cfg.vulkan = false
-            warnings.append("Vulkan is off for this session: iPadOS refused GPU shared memory (\(problem)). OpenGL still works.")
+            warnings.append("Vulkan is off for this session: no GPU shared memory (\(problem)). OpenGL still works.")
             DiagLog.write("vulkan: off, GPU shared memory unavailable: \(problem)")
+        } else if cfg.vulkan, RuntimeController.sharedMemory.fileFallback {
+            DiagLog.write("vulkan: on, Venus blob memory file-backed (\(Paths.gpuSharedMemory.lastPathComponent))")
         }
         cfg.gl = !s.safeGraphics
         if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
@@ -369,6 +416,10 @@ final class RuntimeController: ObservableObject {
 
         phase = .booting("Connecting to Linux")
         try await connectChannels()
+        if RuntimeController.sharedMemory.fileFallback {
+            // QEMU and virglrenderer are loaded now: their imports should be redirected.
+            DiagLog.write("gpu shm: \(RuntimeController.sharedMemoryStats)")
+        }
         phase = .booting("Booting Linux")
     }
 
@@ -387,8 +438,8 @@ final class RuntimeController: ObservableObject {
                 let shm = Paths.ensure(container.appendingPathComponent("tmp", isDirectory: true))
                 env["XDG_RUNTIME_DIR"] = shm.path
             }
-        } else if settings.vulkan {
-            warnings.append("No app group in the signing profile: Vulkan (Venus) blob memory will fail. Re-sign with app groups enabled.")
+        } else if settings.vulkan && !RuntimeController.sharedMemory.fileFallback {
+            warnings.append("No app group in the signing profile and no file fallback: Vulkan (Venus) blob memory will fail.")
         }
         return env
     }

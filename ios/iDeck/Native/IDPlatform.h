@@ -43,7 +43,19 @@ NS_ASSUME_NONNULL_BEGIN
 /// way UTM's virglrenderer names Venus blob memory ("<group>/<hex>").
 /// Returns nil when that works, else why it failed.
 + (nullable NSString *)sharedMemoryProblemForGroup:(nullable NSString *)group;
+/// For the GPU shared memory fallback (IDSharedMemoryFallback): wraps an
+/// unlinked-file mapping in a Metal buffer the way MoltenVK imports Venus
+/// host memory (newBufferWithBytesNoCopy), has the GPU read it and write into
+/// it, and compares. Returns nil when that works, else what failed.
++ (nullable NSString *)fileBackedGPUMemoryProblem;
+/// com.apple.developer.kernel.increased-memory-limit, from the code signature
+/// (else the provisioning profile).
 @property (class, nonatomic, readonly) BOOL hasIncreasedMemoryLimit;
+@property (class, nonatomic, readonly) BOOL hasExtendedVirtualAddressing;
+/// Performance and efficiency CPU cores (hw.perflevel0/1.physicalcpu); 0 if
+/// unknown. iPhones have 2 performance cores, M-series iPads 3-4.
+@property (class, nonatomic, readonly) NSInteger performanceCores;
+@property (class, nonatomic, readonly) NSInteger efficiencyCores;
 /// "development", "testflight/app-store", "unsigned" — from the profile.
 @property (class, nonatomic, readonly) NSString *signingKind;
 

@@ -43,6 +43,13 @@ enum Paths {
         return ensure(base.appendingPathComponent("iDeck/downloads", isDirectory: true))
     }
 
+    /// Backing files for Venus GPU memory when POSIX shared memory is refused
+    /// (IDSharedMemoryFallback). Each file is unlinked as soon as it is
+    /// opened, so this stays empty while Linux runs.
+    static var gpuSharedMemory: URL {
+        ensure(URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ideck-gpu", isDirectory: true))
+    }
+
     /// Short directory for unix sockets: sun_path is limited to 104 bytes.
     static var run: URL {
         ensure(URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ideck", isDirectory: true))

@@ -44,6 +44,28 @@ jobs:
       - run: cmake --build build/cmake -j
       - run: ctest --test-dir build/cmake --output-on-failure
 
+  shm-fallback:
+    name: GPU shared memory fallback (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          mkdir -p build/shm
+          clang -O1 -g -Wall -Wextra -Werror -dynamiclib -o build/shm/libshm_user.dylib ios/tests/shm_fallback/shm_user.c
+          clang -O1 -g -Wall -Wextra -Werror -I ios/iDeck/Native -o build/shm/shm_fallback_test \
+            ios/tests/shm_fallback/test_main.c ios/iDeck/Native/IDSharedMemoryFallback.c
+          # The library must import shm_open through a symbol pointer, as the
+          # iOS frameworks do (checked there with tools in TEST_RESULTS.md).
+          nm -u build/shm/libshm_user.dylib | grep -x '_shm_open'
+      - name: Every allocation file-backed
+        run: build/shm/shm_fallback_test always "$PWD/build/shm/libshm_user.dylib"
+      - name: POSIX shared memory refused by the sandbox (as on iOS without an app group)
+        run: |
+          sandbox-exec -p '(version 1)(allow default)(deny ipc-posix-shm*)' \
+            build/shm/shm_fallback_test denied "$PWD/build/shm/libshm_user.dylib" | tee build/shm/denied.txt
+          if grep -q '^SKIP' build/shm/denied.txt; then echo "::warning::sandbox-exec did not refuse shm_open"; fi
+
   guest-binaries:
     name: Guest binaries (aarch64-linux-musl)
     runs-on: ubuntu-24.04
