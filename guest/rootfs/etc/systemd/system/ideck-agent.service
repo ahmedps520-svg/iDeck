@@ -1,0 +1,19 @@
+[Unit]
+Description=iDeck guest agent (host control and controller channel)
+DefaultDependencies=no
+After=systemd-udevd.service systemd-modules-load.service
+Wants=systemd-modules-load.service
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/ideck/ideck-agent
+Restart=always
+RestartSec=1
+# Controller input is latency-sensitive.
+Nice=-10
+IOSchedulingClass=realtime
+
+[Install]
+WantedBy=sysinit.target

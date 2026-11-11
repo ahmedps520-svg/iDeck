@@ -1,0 +1,14 @@
+[Unit]
+Description=iDeck game library home directory
+# /home is the data disk (formatted on first boot by x-systemd.makefs).
+RequiresMountsFor=/home
+After=home.mount
+Before=ideck-session.service ideck-provision.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/ideck/init-home
+
+[Install]
+WantedBy=multi-user.target

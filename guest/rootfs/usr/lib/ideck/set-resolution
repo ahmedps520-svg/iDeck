@@ -1,0 +1,20 @@
+#!/bin/bash
+# set-resolution WIDTH HEIGHT — changes the guest display mode (run as root
+# by the agent). Adds a CVT mode if the virtio-gpu output lacks it.
+set -euo pipefail
+W="${1:?width}"
+H="${2:?height}"
+[[ "$W" =~ ^[0-9]+$ && "$H" =~ ^[0-9]+$ ]] || { echo "bad size" >&2; exit 2; }
+
+run_x() { runuser -u deck -- env DISPLAY=:0 "$@"; }
+
+OUT=$(run_x xrandr --query | awk '/ connected/{print $1; exit}')
+[ -n "$OUT" ] || { echo "no connected output" >&2; exit 1; }
+MODE="${W}x${H}"
+if ! run_x xrandr --query | grep -qE "^\s+${MODE}\s"; then
+    MODELINE=$(cvt "$W" "$H" 60 | sed -n 's/^Modeline "[^"]*" //p')
+    run_x xrandr --newmode "$MODE" $MODELINE 2>/dev/null || true
+    run_x xrandr --addmode "$OUT" "$MODE"
+fi
+run_x xrandr --output "$OUT" --mode "$MODE"
+echo "$OUT $MODE"

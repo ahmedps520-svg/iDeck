@@ -1,0 +1,25 @@
+# Local toolchain and build output
+.venv/
+build/
+out/
+dist/
+__pycache__/
+*.pyc
+
+# iOS: generated project, dependency sysroots, UTM source checkout
+ios/iDeck.xcodeproj/
+ios/Sysroot.xcconfig
+ios/sysroot-*/
+ios/.utm-src/
+*.xcarchive
+*.ipa
+DerivedData/
+
+# Never commit signing material
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+
+.DS_Store
+Thumbs.db

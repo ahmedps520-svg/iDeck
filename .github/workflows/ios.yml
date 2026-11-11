@@ -1,0 +1,147 @@
+name: iOS app
+
+# Builds iDeck on a macOS runner with Apple's SDK. No Mac needed locally.
+#   sideload   unsigned IPA (re-signed by Sideloadly / AltStore / SideStore with
+#              your Apple ID; development signing keeps get-task-allow for JIT)
+#   testflight interpreter (TCI) edition, signed and uploaded to TestFlight
+#              when App Store Connect API secrets are configured
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        type: choice
+        options: [sideload, testflight, both]
+        default: sideload
+      bundle_id:
+        description: Bundle identifier
+        default: com.ideck.app
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  # macOS runner image with Xcode 26+ (UTM 5's sysroot is built against the
+  # iOS 26 SDK). Override with the repository variable IDECK_MACOS_RUNNER.
+  BUNDLE_ID: ${{ inputs.bundle_id || 'com.ideck.app' }}
+
+jobs:
+  sideload:
+    if: github.event_name == 'push' || inputs.edition != 'testflight'
+    runs-on: ${{ vars.IDECK_MACOS_RUNNER || 'macos-26' }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+      - name: Tools
+        run: |
+          brew install xcodegen
+          # Only needed when UTM's dependencies are built from source.
+          brew install bison pkg-config gettext glib libgpg-error nasm meson || true
+          pip3 install --break-system-packages six pyparsing || pip3 install six pyparsing || true
+      - uses: actions/cache@v4
+        with:
+          path: ios/sysroot-iOS-arm64
+          key: utm-sysroot-v5.0.8-ios-arm64
+      - name: UTM dependency sysroot (QEMU, virglrenderer/Venus, MoltenVK, ANGLE, SPICE)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="$(brew --prefix bison)/bin:$PATH"
+          bash ios/scripts/fetch_sysroot.sh ios
+      - name: Generate project
+        run: |
+          bash ios/scripts/gen_sysroot_xcconfig.sh ios/sysroot-iOS-arm64
+          cd ios && xcodegen generate
+      - name: Archive (unsigned)
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild -project ios/iDeck.xcodeproj -scheme iDeck -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/iDeck.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            IDECK_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            IDECK_MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/runtime-latest/manifest.json" \
+            | tee build/xcodebuild.log | grep -E '(error|warning: unable|BUILD|ARCHIVE)' || true
+          test -d build/iDeck.xcarchive/Products/Applications/iDeck.app
+      - name: Package IPA
+        run: bash ios/scripts/package_ipa.sh build/iDeck.xcarchive build/iDeck.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iDeck-sideload-ipa
+          path: build/iDeck.ipa
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+      - name: Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/iDeck.ipa --title "iDeck $GITHUB_REF_NAME" --generate-notes
+
+  testflight:
+    if: github.event_name == 'workflow_dispatch' && (inputs.edition == 'testflight' || inputs.edition == 'both')
+    runs-on: ${{ vars.IDECK_MACOS_RUNNER || 'macos-26' }}
+    timeout-minutes: 360
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Check signing secrets
+        id: secrets
+        run: |
+          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_KEY_P8_BASE64" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "::notice::TestFlight secrets not configured (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8_BASE64, APPLE_TEAM_ID); skipping."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.ok == 'true'
+      - name: Build, sign and upload the TestFlight (interpreter) edition
+        if: steps.secrets.outputs.ok == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          brew install xcodegen bison pkg-config gettext glib libgpg-error nasm meson || true
+          export PATH="$(brew --prefix bison)/bin:$PATH"
+          bash ios/scripts/fetch_sysroot.sh ios-tci
+          bash ios/scripts/gen_sysroot_xcconfig.sh ios/sysroot-iOS-TCI-arm64
+          (cd ios && xcodegen generate)
+          KEY="$RUNNER_TEMP/asc.p8"
+          printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          xcodebuild -project ios/iDeck.xcodeproj -scheme iDeckTF -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -archivePath build/iDeckTF.xcarchive archive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic IDECK_BUNDLE_ID="$BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            IDECK_MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/runtime-latest/manifest.json" \
+            "${AUTH[@]}"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+          </dict></plist>
+          PLIST
+          sed -i '' 's/^          //' "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive -archivePath build/iDeckTF.xcarchive \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath build/testflight "${AUTH[@]}"
+          rm -f "$KEY"

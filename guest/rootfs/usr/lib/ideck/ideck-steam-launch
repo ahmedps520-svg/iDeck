@@ -1,0 +1,54 @@
+#!/bin/bash
+# Starts the native ARM64 Steam client inside the iDeck X session.
+# Run by ideck-steam.service as user "deck". Installs the client first if
+# the bootstrap has not completed (e.g. provisioning was interrupted).
+set -euo pipefail
+
+export HOME=/home/deck
+export USER=deck
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+export XDG_SESSION_TYPE=x11
+
+# Launch preferences written by the guest agent (steam.configure).
+IDECK_STEAM_BIGPICTURE=0
+IDECK_STEAM_BETA=0
+IDECK_STEAM_CEF_NOGPU=0
+IDECK_MANGOHUD=0
+if [ -r /var/lib/ideck/steam.env ]; then
+    # shellcheck disable=SC1091
+    . /var/lib/ideck/steam.env
+fi
+
+# Wait for the X server (started by ideck-session.service).
+for _ in $(seq 1 180); do
+    [ -S /tmp/.X11-unix/X0 ] && break
+    sleep 1
+done
+[ -S /tmp/.X11-unix/X0 ] || { echo "ideck-steam-launch: X server did not start" >&2; exit 1; }
+
+STEAMROOT="$HOME/.local/share/Steam"
+bootstrap=(python3 /usr/lib/ideck/steam_bootstrap.py)
+if ! "${bootstrap[@]}" --check; then
+    if [ "$IDECK_STEAM_BETA" = 1 ]; then
+        "${bootstrap[@]}" --beta
+    else
+        "${bootstrap[@]}"
+    fi
+fi
+
+args=(-noverifyfiles)
+[ "$IDECK_STEAM_BIGPICTURE" = 1 ] && args+=(-gamepadui)
+# Software rendering for the Steam UI (CEF) only; games still use the GPU.
+[ "$IDECK_STEAM_CEF_NOGPU" = 1 ] && args+=(-cef-disable-gpu -cef-disable-gpu-compositing)
+
+# In-game FPS / frame-time overlay (MangoHud Vulkan layer; inherited by games).
+if [ "$IDECK_MANGOHUD" = 1 ]; then
+    export MANGOHUD=1
+    export MANGOHUD_CONFIG="fps,frametime,frame_timing,cpu_stats,ram,position=top-left,font_size=18,background_alpha=0.4"
+fi
+
+export LD_LIBRARY_PATH="$STEAMROOT/steamrtarm64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+cd "$STEAMROOT"
+exec "$STEAMROOT/steamrtarm64/steam" "${args[@]}"

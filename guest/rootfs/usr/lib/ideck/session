@@ -1,0 +1,22 @@
+#!/bin/bash
+# iDeck X session (started by xinit from ideck-session.service as "deck").
+# Minimal on purpose: a window manager for Steam's windows, the SPICE agent
+# for resolution/clipboard, and nothing else competing for the CPU.
+
+xset s off -dpms s noblank 2>/dev/null || true
+# Let services running as this user (Steam) connect without a cookie file.
+xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 || true
+xsetroot -solid '#0b0b0d' 2>/dev/null || true
+
+# Follows the iPad view size and syncs the clipboard (SPICE vdagent).
+if command -v spice-vdagent >/dev/null; then
+    spice-vdagent -x &
+fi
+
+openbox --config-file /usr/lib/ideck/openbox-rc.xml &
+WM=$!
+
+# Tell systemd (and therefore ideck-steam.service) the display is ready.
+systemd-notify --ready 2>/dev/null || true
+
+wait "$WM"

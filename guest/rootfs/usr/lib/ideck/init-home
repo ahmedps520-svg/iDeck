@@ -1,0 +1,17 @@
+#!/bin/bash
+# Creates /home/deck on a freshly formatted library disk (first boot or a
+# new data disk). Never touches an existing home, so it stays fast even with
+# a large Steam library.
+set -euo pipefail
+if [ ! -d /home/deck ]; then
+    install -d -m 0750 -o deck -g deck /home/deck
+    cp -a /etc/skel/. /home/deck/
+    chown -R deck:deck /home/deck
+fi
+install -d -m 0755 -o root -g root /home/.ideck
+install -d -m 0755 -o root -g root /home/.ideck/fex
+# Persist Steam launch preferences across runtime updates (system disk is
+# replaced on update; /home is not).
+if [ -f /home/.ideck/steam.env ] && [ ! -f /var/lib/ideck/steam.env ]; then
+    install -D -m 0644 /home/.ideck/steam.env /var/lib/ideck/steam.env
+fi

@@ -1,0 +1,37 @@
+// iDeck — platform queries: JIT availability, memory limits, signing.
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface IDPlatform : NSObject
+
+/// The kernel marked this process CS_DEBUGGED: a debugger (StikDebug, Xcode)
+/// attached, which is what makes JIT possible for sideloaded apps.
+@property (class, nonatomic, readonly) BOOL isDebuggerAttached;
+/// A debugger is attached right now (P_TRACED).
+@property (class, nonatomic, readonly) BOOL isTraced;
+/// iOS/iPadOS 26 or later: TXM devices need the debugger-assisted JIT
+/// protocol implemented by the utmapp/qemu fork (split-wx + brk #0x69).
+@property (class, nonatomic, readonly) BOOL needsTXMJITProtocol;
+
+/// os_proc_available_memory(): bytes the app may still allocate before
+/// iPadOS terminates it.
+@property (class, nonatomic, readonly) uint64_t availableMemory;
+/// task_vm_info.phys_footprint: what jetsam charges this app.
+@property (class, nonatomic, readonly) uint64_t physFootprint;
+@property (class, nonatomic, readonly) uint64_t physicalMemory;
+/// e.g. "iPad17,1"
+@property (class, nonatomic, readonly) NSString *modelIdentifier;
+
+/// Entitlements from embedded.mobileprovision (nil if absent, e.g. unsigned).
+@property (class, nonatomic, readonly, nullable) NSDictionary<NSString *, id> *provisionedEntitlements;
+/// First com.apple.security.application-groups entry; needed by
+/// virglrenderer's shm_open() for Venus blob memory.
+@property (class, nonatomic, readonly, nullable) NSString *applicationGroupIdentifier;
+@property (class, nonatomic, readonly) BOOL hasIncreasedMemoryLimit;
+/// "development", "testflight/app-store", "unsigned" — from the profile.
+@property (class, nonatomic, readonly) NSString *signingKind;
+
+@end
+
+NS_ASSUME_NONNULL_END

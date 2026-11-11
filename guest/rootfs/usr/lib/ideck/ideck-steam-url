@@ -1,0 +1,11 @@
+#!/bin/bash
+# ideck-steam-url steam://... — passes a URL to the running Steam client
+# (single-instance IPC), as user "deck". Called by the guest agent.
+set -euo pipefail
+URL="${1:?steam:// URL}"
+case "$URL" in steam://*) ;; *) echo "not a steam:// URL" >&2; exit 2 ;; esac
+STEAMROOT=/home/deck/.local/share/Steam
+exec runuser -u deck -- env HOME=/home/deck DISPLAY=:0 \
+    XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
+    LD_LIBRARY_PATH="$STEAMROOT/steamrtarm64" \
+    "$STEAMROOT/steamrtarm64/steam" "$URL"

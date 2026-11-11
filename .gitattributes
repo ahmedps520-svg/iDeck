@@ -1,0 +1,4 @@
+# Shell scripts, systemd units and configs run on Linux/macOS: keep LF.
+* text=auto eol=lf
+*.png binary
+*.bat text eol=crlf

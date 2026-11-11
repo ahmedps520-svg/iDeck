@@ -1,0 +1,9 @@
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes
+# QEMU user networking (slirp) provides DHCP and DNS at 10.0.2.2/10.0.2.3.
+
+[DHCPv4]
+UseDNS=yes

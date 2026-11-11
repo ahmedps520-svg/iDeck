@@ -1,0 +1,7 @@
+# iDeck guest filesystems.
+# System disk: whole-disk ext4, replaced on runtime updates.
+/dev/vda  /  ext4  rw,noatime,errors=remount-ro  0 1
+# Game library disk (data.img on the iPad): formatted on first boot and
+# grown to the device size at every boot; never replaced by updates.
+/dev/disk/by-id/virtio-ideck-data  /home  ext4  defaults,noatime,discard,nofail,x-systemd.makefs,x-systemd.growfs,x-systemd.device-timeout=20s  0 2
+tmpfs  /tmp  tmpfs  mode=1777,size=25%  0 0

@@ -1,0 +1,14 @@
+[Unit]
+Description=Mount the FEX x86-64 RootFS used by Steam's ARM64 FEX tool
+RequiresMountsFor=/home
+ConditionPathExists=/home/.ideck/fex/rootfs.img
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/mkdir -p /usr/share/guestos/fex-mesa
+ExecStart=/bin/sh -c 'mountpoint -q /usr/share/guestos/fex-mesa || mount -o loop,ro,nodev /home/.ideck/fex/rootfs.img /usr/share/guestos/fex-mesa'
+ExecStop=/bin/umount /usr/share/guestos/fex-mesa
+
+[Install]
+WantedBy=multi-user.target

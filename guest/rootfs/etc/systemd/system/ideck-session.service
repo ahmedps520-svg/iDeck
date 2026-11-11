@@ -1,0 +1,26 @@
+[Unit]
+Description=iDeck graphical session (Xorg + window manager)
+After=systemd-user-sessions.service ideck-home.service systemd-logind.service
+Wants=ideck-home.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=deck
+# A real logind session on seat0/tty1: gives the user DRM access, a
+# systemd --user instance (PipeWire) and XDG_RUNTIME_DIR.
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=x11
+ExecStart=/usr/bin/xinit /usr/lib/ideck/session -- :0 vt1 -nolisten tcp -keeptty -novtswitch -nocursor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

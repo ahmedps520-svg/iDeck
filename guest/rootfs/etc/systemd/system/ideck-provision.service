@@ -1,0 +1,15 @@
+[Unit]
+Description=iDeck first-boot provisioning (Steam, compatibility tools, self-test)
+After=network-online.target ideck-home.service ideck-agent.service
+Wants=network-online.target
+Requires=ideck-home.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/lib/ideck/provision.py
+# Long first run (downloads); never time out.
+TimeoutStartSec=infinity
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

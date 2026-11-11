@@ -1,0 +1,76 @@
+import SwiftUI
+
+struct SettingsView: View {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var runtime: RuntimeController
+    @AppStorage("ideck.manifestURL") private var manifestURL = ""
+    @State private var showAdvanced = false
+
+    var body: some View {
+        Form {
+            Section("Display") {
+                Picker("Resolution", selection: $model.settings.resolution) {
+                    ForEach(Settings.Resolution.allCases) { Text($0.rawValue).tag($0) }
+                }
+                Picker("Refresh rate", selection: $model.settings.refreshHz) {
+                    Text("30 Hz").tag(30)
+                    Text("60 Hz").tag(60)
+                }
+                Text("720p is the target for emulated games; higher resolutions cost GPU time and memory.")
+                    .font(.caption).foregroundStyle(Theme.textTertiary)
+            }
+            Section("Performance") {
+                Picker("Profile", selection: $model.settings.profile) {
+                    ForEach(Settings.PerformanceProfile.allCases) { Text("\($0.title) (\($0.cpus) vCPUs)").tag($0) }
+                }
+                Picker("Linux memory", selection: $model.settings.guestMemoryMb) {
+                    Text("Automatic").tag(UInt64(0))
+                    ForEach([UInt64(2048), 3072, 4096, 5120, 6144], id: \.self) { mb in
+                        Text("\(mb / 1024) GB" + ((runtime.plan?.allowedTiers.contains(mb) ?? true) ? "" : " (over limit)")).tag(mb)
+                    }
+                }
+                Toggle("Vulkan (Venus)", isOn: $model.settings.vulkan)
+            }
+            Section("Steam") {
+                Toggle("Start in Big Picture mode", isOn: $model.settings.steamBigPicture)
+                Toggle("Steam beta client", isOn: $model.settings.steamBeta)
+                Toggle("Software-rendered Steam UI (compatibility)", isOn: $model.settings.steamSoftwareUI)
+                Toggle("FPS overlay in games (MangoHud)", isOn: $model.settings.showPerformanceOverlay)
+            }
+            Section("Audio & feedback") {
+                Toggle("Game audio", isOn: $model.settings.audio)
+                Toggle("Controller vibration", isOn: $model.settings.hapticsEnabled)
+                Toggle("Notifications", isOn: $model.settings.notifications)
+            }
+            Section("Runtime") {
+                LabeledContent("Runtime version", value: RuntimeFiles.current()?.version ?? "not installed")
+                LabeledContent("Core", value: Core.version)
+                LabeledContent("Edition", value: RuntimeController.edition == "jit" ? "Sideload (JIT)" : "TestFlight (interpreter)")
+                LabeledContent("Signing", value: IDPlatform.signingKind)
+                LabeledContent("App group", value: IDPlatform.applicationGroupIdentifier ?? "none")
+            }
+            Section {
+                DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+                    Picker("CPU model", selection: $model.settings.cpuModel) {
+                        Text("Neoverse N1 (ARMv8.2, default)").tag("neoverse-n1")
+                        Text("Neoverse V1 (ARMv8.4 + SVE)").tag("neoverse-v1")
+                        Text("max (all emulated features)").tag("max")
+                    }
+                    Toggle("File-backed Linux memory (experimental)", isOn: $model.settings.fileBackedRAM)
+                    Text("Keeps guest RAM in a file so iPadOS can page it out instead of terminating iDeck. Uses flash writes; untested on M5.")
+                        .font(.caption).foregroundStyle(Theme.textTertiary)
+                    TextField("Runtime manifest URL (https)", text: $manifestURL)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                }
+            }
+            Section("Diagnostics") {
+                ShareLink(item: Paths.qemuLog) { Label("Share QEMU log", systemImage: "doc.text") }
+                ShareLink(item: Paths.consoleLog) { Label("Share Linux console log", systemImage: "terminal") }
+            }
+            Text("Changes apply the next time Linux starts.").font(.caption).foregroundStyle(Theme.textTertiary)
+        }
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Settings")
+    }
+}
