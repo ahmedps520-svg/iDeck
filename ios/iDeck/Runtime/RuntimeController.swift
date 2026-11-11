@@ -57,10 +57,37 @@ final class RuntimeController: ObservableObject {
     private var input: InputChannel?
     private var settings: Settings { Settings.load() }
     private var bootStarted = Date()
+    private var loggedProvisionDetails = Set<String>()
     private var observers: [NSObjectProtocol] = []
 
     /// "jit" for the sideload edition, "se" for the interpreter (TestFlight) edition.
     static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
+
+    /// Venus (Vulkan) blob memory is POSIX shared memory named under an app
+    /// group (UTM's virglrenderer, anon_file.c); iPadOS refuses the name
+    /// unless the code signature carries that group. Tried once per launch:
+    /// the first group that works, or why none does.
+    struct SharedMemoryCheck {
+        var group: String?
+        var problem: String?
+        var summary: String {
+            if let group { return "ok under \(group)" }
+            return "unavailable (\(problem ?? "unknown"))"
+        }
+    }
+    static let sharedMemory: SharedMemoryCheck = {
+        let candidates = IDPlatform.applicationGroupCandidates
+        var problems: [String] = []
+        for group in candidates {
+            if let problem = IDPlatform.sharedMemoryProblem(forGroup: group) {
+                problems.append(problem)
+            } else {
+                return SharedMemoryCheck(group: group, problem: nil)
+            }
+        }
+        return SharedMemoryCheck(group: nil, problem: problems.isEmpty ? "no app group in the signing profile"
+                                                                       : problems.joined(separator: "; "))
+    }()
 
     init() {
         IDCrashLog.install(withPath: Paths.crashLog.path)
@@ -68,8 +95,10 @@ final class RuntimeController: ObservableObject {
         DiagLog.write("iDeck launch: \(IDPlatform.modelIdentifier), \(UIDevice.current.systemName) \(UIDevice.current.systemVersion), "
                       + "edition \(RuntimeController.edition), signing \(IDPlatform.signingKind), "
                       + "CS_DEBUGGED \(IDPlatform.isDebuggerAttached), traced \(IDPlatform.isTraced), "
-                      + "app group \(IDPlatform.applicationGroupIdentifier ?? "none"), "
+                      + "app group \(IDPlatform.applicationGroupIdentifier ?? "none") (\(IDPlatform.applicationGroupSource)), "
                       + "available \(IDPlatform.availableMemory >> 20) MiB, footprint \(IDPlatform.physFootprint >> 20) MiB")
+        DiagLog.write("signature: app groups \((IDPlatform.signedEntitlements?["com.apple.security.application-groups"] as? [String]) ?? []), "
+                      + "candidates \(IDPlatform.applicationGroupCandidates), GPU shared memory \(RuntimeController.sharedMemory.summary)")
         refreshInstalledState()
         memory.apply = { [weak self] actions in await self?.applyPressure(actions) }
         memory.start()
@@ -249,11 +278,27 @@ final class RuntimeController: ObservableObject {
                            qmpSocket: Paths.qmpSocket.path, controlSocket: Paths.controlSocket.path,
                            inputSocket: Paths.inputSocket.path, consoleLog: Paths.consoleLog.path)
         cfg.vulkan = s.vulkan && !s.safeGraphics
+        if cfg.vulkan, let problem = RuntimeController.sharedMemory.problem {
+            // Without shared memory every Venus blob fails (virtio-gpu
+            // RESOURCE_CREATE_BLOB -> ERR_UNSPEC) and Vulkan programs in Linux
+            // only error out; OpenGL (VirGL over ANGLE/Metal) needs no blobs.
+            cfg.vulkan = false
+            warnings.append("Vulkan is off for this session: iPadOS refused GPU shared memory (\(problem)). OpenGL still works.")
+            DiagLog.write("vulkan: off, GPU shared memory unavailable: \(problem)")
+        }
         cfg.gl = !s.safeGraphics
         if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
         cfg.audio = s.audio ? "hda" : "none"
         cfg.splitWx = RuntimeController.edition == "jit"
-        if s.fileBackedRAM { cfg.ramFile = Paths.guestRAMFile.path }
+        if s.ramInFile {
+            // Guest RAM as a shared file mapping: iPadOS can write those pages
+            // back to disk and drop them, and they are not charged to the app's
+            // memory footprint the way anonymous memory is (the guest page
+            // cache filled during the Steam download got iDeck terminated).
+            try? FileManager.default.removeItem(at: Paths.guestRAMFile)
+            cfg.ramFile = Paths.guestRAMFile.path
+        }
+        DiagLog.write("vm: guest RAM \(cfg.ramFile.isEmpty ? "anonymous" : "file-backed"), vulkan \(cfg.vulkan), gl \(cfg.gl)")
         if let ext = StorageManager.externalLibraryImage() { cfg.extraDisks = [ext.path] }
         let args = try Core.call("qemu.args", cfg, as: QemuArgs.self)
         warnings += args.warnings
@@ -288,7 +333,7 @@ final class RuntimeController: ObservableObject {
             .appendingPathComponent("icd.d/MoltenVK_icd.json"), FileManager.default.fileExists(atPath: icd.path) {
             env["VK_DRIVER_FILES"] = icd.path
         }
-        if let group = IDPlatform.applicationGroupIdentifier {
+        if let group = RuntimeController.sharedMemory.group ?? IDPlatform.applicationGroupIdentifier {
             // virglrenderer creates Venus blob memory with shm_open(), which
             // the sandbox only allows under the app group prefix.
             env["APP_SANDBOX_GROUP_ID"] = group
@@ -385,6 +430,13 @@ final class RuntimeController: ObservableObject {
                 return "\(s["id"] as? String ?? "?")=\(s["state"] as? String ?? "?")\(p)"
             }
             DiagLog.write("provision[\(data["state"] as? String ?? "?")]: \(steps.joined(separator: ", "))")
+            // What failed and why, once per step and outcome.
+            for s in data["steps"] as? [[String: Any]] ?? [] {
+                guard let id = s["id"] as? String, let state = s["state"] as? String,
+                      state == "failed" || state == "warning" else { continue }
+                let line = "provision \(id) \(state): \(s["detail"] as? String ?? "")"
+                if loggedProvisionDetails.insert(line).inserted { DiagLog.write(line) }
+            }
         case "shutdown":
             phase = .stopping
         default:
@@ -409,6 +461,9 @@ final class RuntimeController: ObservableObject {
         input?.close()
         controllers.bind(to: nil)
         displayConnected = false
+        // Guest RAM contents are worthless now; unlinking frees the disk space
+        // once the mapping goes away with the process.
+        try? FileManager.default.removeItem(at: Paths.guestRAMFile)
         if let message, status != 0 {
             phase = .failed(message + tailOfLog())
             lastError = message

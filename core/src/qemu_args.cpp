@@ -208,8 +208,11 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
         add({"-mon", "chardev=qmp0,mode=control"});
     }
 
-    if (c.balloon) {
+    if (c.balloon && c.ram_file.empty()) {
         // Free page reporting hands pages the guest frees back to the host.
+        // Not with file-backed RAM: discarding file pages needs
+        // fallocate(PUNCH_HOLE), which Darwin lacks, so every report would
+        // only log "fallocate not available" (QEMU ram_block_discard_range).
         add({"-device", "virtio-balloon-pci,id=balloon0,free-page-reporting=on,deflate-on-oom=on"});
     }
 

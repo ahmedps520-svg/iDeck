@@ -108,6 +108,31 @@ and names any library that does not resolve.
 | App memory limit measured at **5120 MiB** (5110 MiB available at launch), so the planner chose a 2 GiB guest | planner retuned: 3 GiB at this limit (build 10) |
 | `CS_DEBUGGED` true but `P_TRACED` false: StikDebug attached and detached at once (no script assigned to an unknown app) | in-app JIT request with `script-name=legacy.js`, and P_TRACED required on iPadOS 26+ (build 11) |
 
+### Device run, build 15 (iPad17,2, iPadOS 27.2, runtime 0.1.1)
+
+Measured from `ideck.log`, `qemu.log` and `console.log` shared from the device:
+
+- JIT through StikDebug legacy.js: `CS_DEBUGGED` true, `traced` true.
+- Linux reached the guest agent **10 s** after QEMU started (guest 3072 MiB, 4 vCPU, TB cache 384 MiB).
+- In-guest setup: `install-steam` done (the 0.1.1 minimal client), `install-compat` done (FEX RootFS downloaded, verified and mounted).
+- `init-graphics` failed. Every Venus blob creation failed: `virtio_gpu_virgl_process_cmd: ctrl 0x10c, error 0x1200` (RESOURCE_CREATE_BLOB → ERR_UNSPEC), followed by MAP/UNMAP_BLOB and UNREF failing for the missing resource. This happened once per provisioning attempt.
+- iPadOS terminated iDeck about 75 s into setup. `crash.log` was empty, so no signal reached the app, which points to a memory kill. The trace showed the app footprint climbing steadily while the guest itself reported only 133–386 MiB used:
+
+  | Time | Footprint | Available |
+  |---|---|---|
+  | 12:39:21 | 857 MiB | 4262 MiB |
+  | 12:40:01 | 2282 MiB | 2837 MiB |
+  | 12:40:31 | 3228 MiB | 1891 MiB |
+
+  The growth matches guest RAM being touched by page cache during the Steam and FEX downloads. Guest RAM is anonymous memory, so all of it is charged to the app. The installer's `provision.retry` then restarted provisioning twice, re-running the GPU probes each time.
+
+| Finding | Fix (build 16) |
+|---|---|
+| Guest page cache charged to the app footprint | guest RAM in a shared file mapping in Caches (`memory-backend-file,share=on`), on by default; no balloon in that mode (QEMU cannot discard file-backed RAM on Darwin) |
+| Venus blob memory: UTM's virglrenderer uses `shm_open("<app group>/<hex>")`, which the sandbox allows only for an app group in the code signature | at launch, read the signed entitlements (csops) and probe shm under each candidate group; Vulkan is turned off for the session when none works (OpenGL is unaffected) and the reason is logged |
+| A failed graphics check stopped setup and triggered retries | `vulkan` is an optional check; a step with only optional failures ends as `warning` and setup continues; the automatic retry is only for the download steps; step details are logged |
+| The device stayed on runtime 0.1.1 | the newer-runtime check now runs until setup completes, not only before the first boot |
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

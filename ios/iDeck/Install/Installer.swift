@@ -23,6 +23,8 @@ final class Installer: ObservableObject {
     @Published private(set) var pausedMessage: String?
     private var pauseRequested = false
     @Published private(set) var failure: String?
+    /// Steps that finished with warnings (optional checks that failed).
+    @Published private(set) var notes: [String] = []
     @Published private(set) var manifestSummary: String?
 
     private let runtime: RuntimeController
@@ -85,10 +87,10 @@ final class Installer: ObservableObject {
         failure = nil
         pausedMessage = nil
         defer { running = false }
-        // Until Linux has booted once, always use the newest published
-        // runtime: fixes for the guest (e.g. Steam dependencies) ship there.
-        if !isComplete, steps.first(where: { $0.id == "boot-guest" })?.state != "done",
-           Paths.activeRuntimeVersion != nil, !runtime.isRunning,
+        // Until setup has finished, always use the newest published runtime:
+        // fixes for the guest (e.g. Steam dependencies) ship there. Linux must
+        // not be running, as the system disk is replaced.
+        if !isComplete, Paths.activeRuntimeVersion != nil, !runtime.isRunning,
            let newer = await newerRuntimeAvailable() {
             DiagLog.write("setup: runtime \(newer) is newer than \(Paths.activeRuntimeVersion ?? "?"); reinstalling runtime")
             _ = try? journal("journal.reset_from", ["id": "fetch-manifest"])
@@ -458,15 +460,26 @@ final class Installer: ObservableObject {
                 update(id, detail: s["detail"] as? String, progress: s["progress"] as? Double)
                 switch state {
                 case "done": return false
+                case "warning":
+                    // Optional checks failed (e.g. Vulkan): setup goes on.
+                    let note = "\(s["title"] as? String ?? id): \(s["detail"] as? String ?? "warning")"
+                    if !notes.contains(note) { notes.append(note) }
+                    DiagLog.write("setup: \(id) passed with warnings: \(s["detail"] as? String ?? "")")
+                    return false
                 case "skipped": return true
                 case "failed":
-                    if !retried {
+                    let detail = s["detail"] as? String ?? "failed in Linux"
+                    DiagLog.write("setup: \(id) failed in Linux: \(detail)")
+                    // Only downloads are worth one automatic retry; the checks
+                    // are deterministic, and every rerun restarts the whole
+                    // provisioning (GPU probes included).
+                    if !retried, id == "install-steam" || id == "install-compat" {
                         retried = true
                         _ = try? await runtime.agent?.request("provision.retry")
                         try await Task.sleep(nanoseconds: 5_000_000_000)
                         continue
                     }
-                    throw Core.CallError(message: s["detail"] as? String ?? "failed in Linux")
+                    throw Core.CallError(message: detail)
                 default: break
                 }
             } else if runtime.provision["cached"] as? Bool == true, runtime.provision["state"] as? String == "done" {

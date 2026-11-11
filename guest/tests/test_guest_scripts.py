@@ -15,6 +15,16 @@ sys.path.insert(0, str(ROOT / "guest" / "rootfs" / "usr" / "lib" / "ideck"))
 sys.path.insert(0, str(ROOT / "tools"))
 
 
+class ProvisionStepStateTests(unittest.TestCase):
+    def test_optional_failure_is_a_warning(self):
+        import provision
+        c = lambda cid, ok, req: {"id": cid, "ok": ok, "required": req, "detail": ""}
+        self.assertEqual(provision.step_state([c("opengl", True, True), c("vulkan", True, False)]), "done")
+        self.assertEqual(provision.step_state([c("opengl", True, True), c("vulkan", False, False)]), "warning")
+        self.assertEqual(provision.step_state([c("opengl", False, True), c("vulkan", True, False)]), "failed")
+        self.assertEqual(provision.step_state([]), "failed")
+
+
 class SteamLibraryTests(unittest.TestCase):
     def test_lists_installed_and_downloading(self):
         with tempfile.TemporaryDirectory() as d:

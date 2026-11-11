@@ -60,8 +60,8 @@ struct SettingsView: View {
                         Text("Neoverse V1 (ARMv8.4 + SVE)").tag("neoverse-v1")
                         Text("max (all emulated features)").tag("max")
                     }
-                    Toggle("File-backed Linux memory (experimental)", isOn: $model.settings.fileBackedRAM)
-                    Text("Keeps guest RAM in a file so iPadOS can page it out instead of terminating iDeck. Uses flash writes; untested on M5.")
+                    Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
+                    Text("On by default. Keeps Linux's RAM in a file so iPadOS can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                     TextField("Runtime manifest URL (https)", text: $manifestURL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()

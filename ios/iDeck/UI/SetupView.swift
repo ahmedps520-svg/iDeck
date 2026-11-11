@@ -44,6 +44,16 @@ struct SetupView: View {
                         Label(p, systemImage: "pause.circle.fill").foregroundStyle(Theme.warning)
                     }
                 }
+                if !installer.notes.isEmpty {
+                    Card {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Finished with warnings", systemImage: "exclamationmark.circle.fill").foregroundStyle(Theme.warning)
+                            ForEach(installer.notes, id: \.self) { n in
+                                Text(n).font(.footnote).foregroundStyle(Theme.textSecondary)
+                            }
+                        }
+                    }
+                }
                 if let f = installer.failure {
                     Card {
                         VStack(alignment: .leading, spacing: 10) {

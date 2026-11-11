@@ -1,7 +1,13 @@
 #import "IDPlatform.h"
 
+#import <arpa/inet.h>
+#import <errno.h>
+#import <fcntl.h>
 #import <mach/mach.h>
 #import <os/proc.h>
+#import <stdlib.h>
+#import <string.h>
+#import <sys/mman.h>
 #import <sys/proc.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
@@ -10,7 +16,10 @@
 // Declared in the private <sys/codesign.h>; exported by libSystem.
 extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 #define ID_CS_OPS_STATUS 0
+#define ID_CS_OPS_ENTITLEMENTS_BLOB 7
 #define ID_CS_DEBUGGED 0x10000000
+// sys/posix_shm.h: longest POSIX shared memory name Darwin accepts.
+#define ID_PSHMNAMLEN 31
 
 @implementation IDPlatform
 
@@ -80,14 +89,93 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
     return [e isKindOfClass:NSDictionary.class] ? e : nil;
 }
 
-+ (NSString *)applicationGroupIdentifier {
-    NSArray *groups = [self provisionedEntitlements][@"com.apple.security.application-groups"];
++ (NSDictionary<NSString *, id> *)signedEntitlements {
+    static NSDictionary *entitlements;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // The blob is {magic, length} (big endian) followed by an XML plist.
+        // A too-small buffer fails with ERANGE but still gets the header.
+        struct { uint32_t magic; uint32_t length; } header = {0, 0};
+        csops(getpid(), ID_CS_OPS_ENTITLEMENTS_BLOB, &header, sizeof(header));
+        uint32_t length = ntohl(header.length);
+        if (ntohl(header.magic) != 0xfade7171 || length <= sizeof(header) || length > (1u << 20)) return;
+        NSMutableData *blob = [NSMutableData dataWithLength:length];
+        if (csops(getpid(), ID_CS_OPS_ENTITLEMENTS_BLOB, blob.mutableBytes, length) != 0) return;
+        NSData *plist = [blob subdataWithRange:NSMakeRange(sizeof(header), length - sizeof(header))];
+        id obj = [NSPropertyListSerialization propertyListWithData:plist options:0 format:nil error:nil];
+        if ([obj isKindOfClass:NSDictionary.class]) entitlements = obj;
+    });
+    return entitlements;
+}
+
+static NSString *IDFirstGroup(NSDictionary *entitlements) {
+    NSArray *groups = entitlements[@"com.apple.security.application-groups"];
     if ([groups isKindOfClass:NSArray.class] && groups.count > 0 && [groups.firstObject isKindOfClass:NSString.class]) {
         return groups.firstObject;
     }
+    return nil;
+}
+
++ (NSString *)applicationGroupIdentifier {
+    NSDictionary *signedEnt = [self signedEntitlements];
+    if (signedEnt) return IDFirstGroup(signedEnt); // authoritative, even when it has none
+    NSString *group = IDFirstGroup([self provisionedEntitlements]);
+    if (group) return group;
     // Fall back to the value baked into Info.plist at build time.
     NSString *fallback = NSBundle.mainBundle.infoDictionary[@"IDeckAppGroup"];
     return fallback.length ? fallback : nil;
+}
+
++ (NSString *)applicationGroupSource {
+    NSDictionary *signedEnt = [self signedEntitlements];
+    if (signedEnt) return IDFirstGroup(signedEnt) ? @"signature" : @"none";
+    if (IDFirstGroup([self provisionedEntitlements])) return @"profile";
+    NSString *fallback = NSBundle.mainBundle.infoDictionary[@"IDeckAppGroup"];
+    return fallback.length ? @"Info.plist" : @"none";
+}
+
++ (NSArray<NSString *> *)applicationGroupCandidates {
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    void (^addAll)(id) = ^(id groups) {
+        if (![groups isKindOfClass:NSArray.class]) return;
+        for (id g in groups) {
+            if ([g isKindOfClass:NSString.class] && [g length] > 0 && ![out containsObject:g]) [out addObject:g];
+        }
+    };
+    addAll([self signedEntitlements][@"com.apple.security.application-groups"]);
+    addAll([self provisionedEntitlements][@"com.apple.security.application-groups"]);
+    NSString *fallback = NSBundle.mainBundle.infoDictionary[@"IDeckAppGroup"];
+    if (fallback.length) addAll(@[fallback]);
+    return out;
+}
+
++ (NSString *)sharedMemoryProblemForGroup:(NSString *)group {
+    if (group.length == 0) return @"no app group in the code signature";
+    // Same budget as virglrenderer's anon_file.c: "<group>/" + slot + nonce.
+    if (group.length > ID_PSHMNAMLEN - 3) {
+        return [NSString stringWithFormat:@"app group name is %lu characters; shared memory names allow at most %d",
+                (unsigned long)group.length, ID_PSHMNAMLEN - 3];
+    }
+    NSString *name = [NSString stringWithFormat:@"%@/f%x", group, arc4random() >> 8];
+    if (name.length > ID_PSHMNAMLEN) name = [name substringToIndex:ID_PSHMNAMLEN];
+    int fd = shm_open(name.UTF8String, O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (fd < 0) return [NSString stringWithFormat:@"shm_open(\"%@\") failed: %s", name, strerror(errno)];
+    shm_unlink(name.UTF8String);
+    NSString *problem = nil;
+    const size_t size = 64 * 1024;
+    if (ftruncate(fd, (off_t)size) != 0) {
+        problem = [NSString stringWithFormat:@"ftruncate on shared memory failed: %s", strerror(errno)];
+    } else {
+        void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (p == MAP_FAILED) {
+            problem = [NSString stringWithFormat:@"mmap of shared memory failed: %s", strerror(errno)];
+        } else {
+            ((volatile char *)p)[0] = 1;
+            munmap(p, size);
+        }
+    }
+    close(fd);
+    return problem;
 }
 
 + (BOOL)hasIncreasedMemoryLimit {

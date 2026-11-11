@@ -118,6 +118,9 @@ TEST("qemu: file-backed RAM and comma escaping") {
     CHECK(has_pair(r.argv, "-machine", "memory-backend=ram0"));
     CHECK(has_pair(r.argv, "-object", "mem-path=/data/ram,,1.bin"));
     CHECK(has_pair(r.argv, "-cpu", "max,pauth=off,sve=off,sme=off"));
+    // No balloon with file-backed RAM (Darwin cannot punch holes in it).
+    CHECK(!has_pair(r.argv, "-device", "virtio-balloon-pci"));
+    CHECK(has_pair(build_qemu_args(ios_config()).argv, "-device", "virtio-balloon-pci"));
 }
 
 TEST("qemu: config JSON round trip") {

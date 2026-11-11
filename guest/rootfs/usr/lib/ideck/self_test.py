@@ -79,8 +79,10 @@ def main() -> int:
     dev = re.search(r"deviceName\s*=\s*(.*)", out)
     api = re.search(r"apiVersion\s*=\s*(\S+)", out)
     d = dev.group(1).strip() if dev else "no device"
+    # Optional: Steam and OpenGL games run without it, and the app turns
+    # Venus off when iPadOS refuses its shared memory.
     check(checks, "vulkan", rc == 0 and dev is not None and "llvmpipe" not in d,
-          f"{d}; api {api.group(1) if api else '?'}")
+          f"{d}; api {api.group(1) if api else '?'}", required=False)
 
     rc, out = run(["pactl", "info"], as_deck=True)
     sink = re.search(r"Default Sink: (.*)", out)

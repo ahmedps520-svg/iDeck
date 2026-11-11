@@ -38,7 +38,10 @@ struct Settings: Codable, Equatable {
     /// Diagnostic: boot without GPU acceleration (plain virtio-gpu, SPICE 2D,
     /// software rendering in Linux). Slow, but isolates GPU-path crashes.
     var safeGraphics = false
-    var fileBackedRAM = false              // experimental: guest RAM in a file
+    /// Guest RAM in a file mapping (Library/Caches) instead of anonymous
+    /// memory. A new key (was fileBackedRAM, off) so saved settings from
+    /// older builds pick up the new default.
+    var ramInFile = true
     var steamBigPicture = false
     var steamBeta = false
     var steamSoftwareUI = false            // CEF without GPU (compatibility)

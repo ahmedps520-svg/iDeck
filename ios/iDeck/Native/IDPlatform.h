@@ -25,9 +25,24 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Entitlements from embedded.mobileprovision (nil if absent, e.g. unsigned).
 @property (class, nonatomic, readonly, nullable) NSDictionary<NSString *, id> *provisionedEntitlements;
+/// Entitlements in this binary's code signature (what the kernel and the
+/// sandbox enforce), read with csops(CS_OPS_ENTITLEMENTS_BLOB). A sideloading
+/// tool may sign with fewer or renamed app groups than the build asked for.
+@property (class, nonatomic, readonly, nullable) NSDictionary<NSString *, id> *signedEntitlements;
 /// First com.apple.security.application-groups entry; needed by
-/// virglrenderer's shm_open() for Venus blob memory.
+/// virglrenderer's shm_open() for Venus blob memory. Taken from the code
+/// signature, else the provisioning profile, else Info.plist.
 @property (class, nonatomic, readonly, nullable) NSString *applicationGroupIdentifier;
+/// Where applicationGroupIdentifier came from: "signature", "profile",
+/// "Info.plist" or "none".
+@property (class, nonatomic, readonly) NSString *applicationGroupSource;
+/// Every app group worth trying, in order: code signature, provisioning
+/// profile, Info.plist (duplicates removed).
+@property (class, nonatomic, readonly) NSArray<NSString *> *applicationGroupCandidates;
+/// Creates, sizes, maps and removes a POSIX shared memory object named the
+/// way UTM's virglrenderer names Venus blob memory ("<group>/<hex>").
+/// Returns nil when that works, else why it failed.
++ (nullable NSString *)sharedMemoryProblemForGroup:(nullable NSString *)group;
 @property (class, nonatomic, readonly) BOOL hasIncreasedMemoryLimit;
 /// "development", "testflight/app-store", "unsigned" — from the profile.
 @property (class, nonatomic, readonly) NSString *signingKind;

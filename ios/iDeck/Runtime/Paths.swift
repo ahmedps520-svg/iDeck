@@ -31,7 +31,12 @@ enum Paths {
     static var journal: URL { state.appendingPathComponent("install-journal.json") }
     static var installedManifest: URL { state.appendingPathComponent("manifest.json") }
     static var settingsFile: URL { state.appendingPathComponent("settings.json") }
-    static var guestRAMFile: URL { library.appendingPathComponent("guest-ram.bin") }
+    /// Scratch backing for guest RAM (Settings.ramInFile): in Caches, so it
+    /// is never backed up; recreated empty at every boot.
+    static var guestRAMFile: URL {
+        let base = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return ensure(base.appendingPathComponent("iDeck", isDirectory: true)).appendingPathComponent("guest-ram.bin")
+    }
 
     static var downloads: URL {
         let base = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]

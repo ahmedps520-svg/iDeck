@@ -185,6 +185,17 @@ def _checks(report, ids):
     return [c for c in report.get("checks", []) if c["id"] in ids]
 
 
+def step_state(checks) -> str:
+    """'done' when every check passed, 'warning' when only optional ones
+    failed (setup goes on; e.g. Vulkan is unavailable but OpenGL works),
+    'failed' when a required check failed or there was nothing to check."""
+    if not checks:
+        return "failed"
+    if not all(c["ok"] for c in checks if c["required"]):
+        return "failed"
+    return "done" if all(c["ok"] for c in checks) else "warning"
+
+
 def runtime_version() -> str:
     try:
         return Path("/usr/lib/ideck/runtime-version").read_text().strip()
@@ -230,13 +241,17 @@ def main() -> int:
     }
     for sid, ids in groups.items():
         cs = _checks(report, ids)
-        ok = bool(cs) and all(c["ok"] for c in cs if c["required"])
-        p.update(sid, state="done" if ok else "failed", progress=1.0,
-                 detail="; ".join(f"{c['id']}: {c['detail']}" for c in cs))
-        if not ok:
+        state = step_state(cs)
+        p.update(sid, state=state, progress=1.0,
+                 detail="; ".join(f"{c['id']}: {'ok' if c['ok'] else ('FAILED' if c['required'] else 'warning')}"
+                                  f" ({c['detail']})" for c in cs))
+        if state == "failed":
             failed = failed or sid
-    p.update("self-test", state="done" if report.get("ok") else "failed", progress=1.0,
-             detail=f"{sum(c['ok'] for c in report.get('checks', []))}/{len(report.get('checks', []))} checks passed")
+    checks = report.get("checks", [])
+    bad = [c for c in checks if not c["ok"]]
+    p.update("self-test", state="failed" if not report.get("ok") else ("warning" if bad else "done"), progress=1.0,
+             detail=f"{sum(c['ok'] for c in checks)}/{len(checks)} checks passed"
+                    + ("; not passing: " + "; ".join(f"{c['id']} ({c['detail']})" for c in bad) if bad else ""))
     p.state["self_test"] = report
     p.state["state"] = "failed" if (failed or not report.get("ok")) else "done"
     p.state["finished"] = int(time.time())
