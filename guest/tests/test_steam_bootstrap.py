@@ -130,6 +130,10 @@ class BootstrapPosixTests(unittest.TestCase):
                               manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
         self.assertEqual(result["status"], "installed")
         self.assertTrue(sb.is_installed(root))
+        # A minimal install must not count as installed for --check: the
+        # client then never fetches CEF/SDL3/codecs (runtime 0.1.2 failure).
+        self.assertFalse(sb.is_installed(root, state))
+        self.assertEqual(json.loads(state.read_text())["mode"], "minimal")
         self.assertTrue(os.access(root / "steam.sh", os.X_OK))
         self.assertFalse(os.access(root / "steamrtarm64/icudtl.dat", os.X_OK))
         self.assertEqual(os.readlink(root / "steamrt64"), "steamrtarm64")

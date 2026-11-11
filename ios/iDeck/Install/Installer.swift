@@ -85,6 +85,15 @@ final class Installer: ObservableObject {
         failure = nil
         pausedMessage = nil
         defer { running = false }
+        // Until Linux has booted once, always use the newest published
+        // runtime: fixes for the guest (e.g. Steam dependencies) ship there.
+        if !isComplete, steps.first(where: { $0.id == "boot-guest" })?.state != "done",
+           Paths.activeRuntimeVersion != nil, !runtime.isRunning,
+           let newer = await newerRuntimeAvailable() {
+            DiagLog.write("setup: runtime \(newer) is newer than \(Paths.activeRuntimeVersion ?? "?"); reinstalling runtime")
+            _ = try? journal("journal.reset_from", ["id": "fetch-manifest"])
+            reloadJournal()
+        }
         UIApplication.shared.isIdleTimerDisabled = true
         defer { UIApplication.shared.isIdleTimerDisabled = false }
         while let step = steps.first(where: { $0.state != "done" && $0.state != "skipped" }) {
@@ -110,6 +119,45 @@ final class Installer: ObservableObject {
                 return
             }
         }
+    }
+
+    /// The published runtime version if it is newer than the installed one.
+    func newerRuntimeAvailable() async -> String? {
+        guard let source = Installer.manifestURL, let installed = Paths.activeRuntimeVersion else { return nil }
+        var req = URLRequest(url: source)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.timeoutInterval = 20
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let published = m["runtime_version"] as? String,
+              Installer.compareVersions(published, installed) > 0 else { return nil }
+        return published
+    }
+
+    /// Numeric dotted-version comparison ("0.1.10" > "0.1.9").
+    static func compareVersions(_ a: String, _ b: String) -> Int {
+        func parts(_ s: String) -> [Int] {
+            s.split(separator: "-").first.map { $0.split(separator: ".").map { Int($0) ?? 0 } } ?? []
+        }
+        let x = parts(a), y = parts(b)
+        for i in 0..<max(x.count, y.count) {
+            let l = i < x.count ? x[i] : 0, r = i < y.count ? y[i] : 0
+            if l != r { return l < r ? -1 : 1 }
+        }
+        return 0
+    }
+
+    /// Downloads and installs the newest runtime, then re-runs the in-guest
+    /// setup. Linux must not be running (the system disk is replaced).
+    func updateRuntime() async {
+        guard !runtime.isRunning else {
+            failure = "Shut down Linux before updating the runtime."
+            return
+        }
+        _ = try? journal("journal.reset_from", ["id": "fetch-manifest"])
+        reloadJournal()
+        await run()
     }
 
     /// Re-runs from a given step (rollback of that step and everything after).

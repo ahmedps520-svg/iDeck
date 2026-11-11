@@ -40,8 +40,10 @@ STATE_VERSION = 1
 # the published packages: bins_linuxarm64_linuxarm64 contains
 # steamrtarm64/steam (ELF aarch64).
 MINIMAL_PACKAGES = ("steam_linuxarm64", "bins_linuxarm64_linuxarm64")
-# Packages the client would fetch anyway; installing them up front avoids a
-# long first-launch update under emulation. Android (Lepton) is skipped.
+# The full set is the default. With only the minimal set the client starts,
+# reports "installed version == manifest version, Nothing to do" and never
+# fetches the rest (CEF/libcef.so, SDL3, codecs), so its UI cannot load.
+# Seen in the runtime 0.1.2 boot test. Android (Lepton) is skipped.
 SKIP_IN_FULL = ("bins_androidarm64_linuxarm64",)
 
 
@@ -281,9 +283,19 @@ def configure(steam_root: Path, home: Path, beta: bool) -> None:
     _symlink(steam_root / "linuxarm64", dot / "sdkarm64")
 
 
-def is_installed(steam_root: Path) -> bool:
+def is_installed(steam_root: Path, state_path: Path | None = None) -> bool:
+    """Client binary present and, if a state file is given, a completed
+    *full* install recorded there (a minimal install is not usable)."""
     exe = steam_root / "steamrtarm64" / "steam"
-    return exe.is_file() and os.access(exe, os.X_OK)
+    if not (exe.is_file() and os.access(exe, os.X_OK)):
+        return False
+    if state_path is None:
+        return True
+    try:
+        st = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        return False
+    return st.get("status") == "installed" and st.get("mode") == "full"
 
 
 def write_state(path: Path, state: dict) -> None:
@@ -311,6 +323,7 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
     total = sum(int(pkgs[n]["size"]) for n in names)
     emit("plan", version=version, packages=names, bytes=total)
     state = {"schema": STATE_VERSION, "platform": PLATFORM, "channel": channel, "version": version,
+             "mode": "full" if full else "minimal",
              "packages": {}, "status": "installing", "updated": int(time.time())}
     if state_path:
         write_state(state_path, state)
@@ -325,7 +338,7 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
         if state_path:
             write_state(state_path, state)
     configure(steam_root, home, beta)
-    if not is_installed(steam_root):
+    if not is_installed(steam_root):  # binary check; state is written below
         raise BootstrapError("client binary steamrtarm64/steam missing after install")
     state["status"] = "installed"
     state["updated"] = int(time.time())
@@ -348,17 +361,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", type=Path, default=None, help="Steam root (default ~/.local/share/Steam)")
     ap.add_argument("--cache", type=Path, default=None)
     ap.add_argument("--beta", action="store_true", help="use the publicbeta client")
-    ap.add_argument("--full", action="store_true", help="install all client packages up front")
-    ap.add_argument("--check", action="store_true", help="exit 0 if installed, 1 if not")
+    ap.add_argument("--minimal", action="store_true",
+                    help="install only the bootstrapper and core binaries (testing; the client will not start its UI)")
+    ap.add_argument("--check", action="store_true", help="exit 0 if a full install is present, 1 if not")
     ap.add_argument("--manifest-url", default=None)
     args = ap.parse_args(argv)
     root = args.root or args.home / ".local/share/Steam"
     cache = args.cache or args.home / ".cache/ideck/steam-bootstrap"
     state_path = args.home / ".local/share/ideck/steam-bootstrap.json"
     if args.check:
-        return 0 if is_installed(root) else 1
+        return 0 if is_installed(root, state_path) else 1
     try:
-        bootstrap(root, args.home, cache, args.beta, args.full, args.manifest_url, state_path=state_path)
+        bootstrap(root, args.home, cache, args.beta, not args.minimal, args.manifest_url, state_path=state_path)
     except (BootstrapError, urllib.error.URLError, OSError) as e:
         emit("error", error=str(e))
         try:

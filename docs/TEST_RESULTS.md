@@ -80,6 +80,34 @@ syscalls are the TCG bottlenecks (soft-float helpers, byte-wise memory
 helpers, full exception round trips). The iPad's M5 will have different
 absolute numbers.
 
+### Linux runtime 0.1.2 boot test (run 43004292541): Steam UI did not load
+
+Boot 34.8 s; provisioning, controller, benchmark and shutdown as for 0.1.1.
+The new 60-minute Steam-window wait and the saved journal showed the client
+**crashing in a loop (296 restarts)**:
+
+```
+dlmopen steamui.so failed: libgtk-x11-2.0.so.0: cannot open shared object file
+Fatal error: Failed to load steamui.so
+```
+
+The updater, manifest check and download hosts all worked under TCG. Two
+causes, fixed for 0.1.3:
+
+1. **Missing system libraries.** The `DT_NEEDED` entries of every ELF in the real `bins_linuxarm64_linuxarm64` package were parsed. Added to `linux/packages.txt`: GTK2 (`libgtk2.0-0t64`), OpenAL, libnm, SDL2, libavif, ICE/SM, fontconfig, freetype, libsndfile, libasyncns, libssh2, brotli, OpenSSL 3, libX11-xcb, libpipewire and the X extensions.
+2. **Minimal install never completed.** With only the 2 core packages, the client reported "installed version == manifest version … Nothing to do" and never fetched CEF (`libcef.so`), SDL3 or the codecs. The bootstrapper now installs the full set by default (34 packages, 996 MB), and `--check` requires a recorded full install.
+
+A new self-test check (`steam-libs`) runs `ldd` on the client's main binaries
+and names any library that does not resolve.
+
+### First device run (iPad17,2 = M5 iPad Pro, iPadOS 27.2, build 9)
+
+| Finding | Fix |
+|---|---|
+| QEMU exited 36 ms after start: `Property 'virtio-gpu-gl-pci.refresh_rate' not found` | removed the property (build 10) |
+| App memory limit measured at **5120 MiB** (5110 MiB available at launch), so the planner chose a 2 GiB guest | planner retuned: 3 GiB at this limit (build 10) |
+| `CS_DEBUGGED` true but `P_TRACED` false: StikDebug attached and detached at once (no script assigned to an unknown app) | in-app JIT request with `script-name=legacy.js`, and P_TRACED required on iPadOS 26+ (build 11) |
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

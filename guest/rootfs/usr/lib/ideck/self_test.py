@@ -94,6 +94,22 @@ def main() -> int:
 
     steam = "/home/deck/.local/share/Steam/steamrtarm64/steam"
     check(checks, "steam-client", os.access(steam, os.X_OK), steam, required=False)
+    # Every library the client's main binaries need must resolve (runtime
+    # 0.1.2: steamui.so could not load libgtk-x11-2.0.so.0).
+    steam_dir = os.path.dirname(steam)
+    if os.path.isdir(steam_dir):
+        missing = set()
+        for name in ("steam", "steamui.so", "steamclient.so", "vgui2_s.so", "steamwebhelper"):
+            path = os.path.join(steam_dir, name)
+            if not os.path.exists(path):
+                continue
+            rc, out = run(["env", f"LD_LIBRARY_PATH={steam_dir}", "ldd", path])
+            for line in out.splitlines():
+                if "not found" in line:
+                    missing.add(f"{line.split('=>')[0].strip()} ({name})")
+        check(checks, "steam-libs", not missing,
+              "all client libraries resolve" if not missing else "missing: " + ", ".join(sorted(missing)),
+              required=False)
     fex = "/usr/share/guestos/fex-mesa"
     check(checks, "fex-rootfs", os.path.isdir(os.path.join(fex, "usr")), fex, required=False)
     rc, out = run(["sysctl", "-n", "kernel.unprivileged_userns_clone"])

@@ -9,6 +9,7 @@ struct RuntimeView: View {
     @State private var log = ""
     @State private var showLog = false
     @State private var message: String?
+    @State private var updateAvailable: String?
 
     var body: some View {
         ScrollView {
@@ -68,6 +69,18 @@ struct RuntimeView: View {
                             }.buttonStyle(SecondaryButtonStyle()).disabled(runtime.isRunning)
                             Button("Repair Setup") { Task { await installer.retry(from: "install-steam") } }
                                 .buttonStyle(SecondaryButtonStyle())
+                            Button(updateAvailable.map { "Update Runtime to \($0)" } ?? "Check for Runtime Update") {
+                                if updateAvailable != nil {
+                                    Task { await installer.updateRuntime() }
+                                } else {
+                                    Task {
+                                        updateAvailable = await installer.newerRuntimeAvailable()
+                                        if updateAvailable == nil { message = "Runtime \(RuntimeFiles.current()?.version ?? "?") is the newest." }
+                                    }
+                                }
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .disabled(runtime.isRunning)
                         }
                         if let message { Text(message).font(.caption).foregroundStyle(Theme.textSecondary) }
                     }

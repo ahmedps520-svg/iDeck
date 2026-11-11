@@ -86,6 +86,32 @@ libcurl4t64
 libusb-1.0-0
 libudev1
 bubblewrap
+# Required by the native linuxarm64 client binaries (DT_NEEDED of steamui.so,
+# vgui2_s.so, steamclient.so, libaudio.so, gldriverquery, gameoverlayui.so,
+# bundled libcurl/libpulsecommon). Missing GTK2 made steamui.so fail to load
+# in the runtime 0.1.2 boot test.
+libgtk2.0-0t64
+libgdk-pixbuf-2.0-0
+libopenal1
+libnm0
+libsdl2-2.0-0
+libavif16
+libice6
+libsm6
+libfontconfig1
+libfreetype6
+libsndfile1
+libasyncns0
+libssh2-1t64
+libbrotli1
+libssl3t64
+libx11-xcb1
+libxcb1
+libpipewire-0.3-0t64
+libxfixes3
+libxext6
+libxrender1
+libxi6
 zenity
 xdg-utils
 file
