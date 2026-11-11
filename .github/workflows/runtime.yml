@@ -48,8 +48,7 @@ jobs:
           python tools/build_core.py lib
       - name: Host packages
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mmdebstrap debian-archive-keyring e2fsprogs qemu-system-arm qemu-utils
+          bash tools/ci_apt.sh mmdebstrap debian-archive-keyring e2fsprogs qemu-system-arm qemu-utils
       - name: Build image
         run: |
           sudo bash linux/build-image.sh --version "${{ steps.v.outputs.version }}" \
