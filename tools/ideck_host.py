@@ -168,7 +168,9 @@ def main() -> int:
     a = ap.parse_args()
 
     a.report.mkdir(parents=True, exist_ok=True)
-    report: dict = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "host": os.uname()._asdict(),
+    u = os.uname()  # a struct sequence: no _asdict()
+    host = {k: getattr(u, k) for k in ("sysname", "nodename", "release", "version", "machine")}
+    report: dict = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "host": host,
                     "steps": []}
     t0 = time.time()
 

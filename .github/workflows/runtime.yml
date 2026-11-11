@@ -58,12 +58,18 @@ jobs:
           sudo chown -R "$USER" out
           ls -la out
       - name: Boot test (QEMU TCG, provisioning, Steam, benchmark)
+        id: boot
         if: github.event_name == 'push' || inputs.boot_test
         continue-on-error: true
         timeout-minutes: 240
         run: |
           python3 tools/ideck_host.py --core build/core/libideck_core.so --runtime out \
             --report out/boot-test --memory 4096 --cpus 4
+      - name: Report boot test outcome
+        if: steps.boot.outcome == 'failure'
+        run: |
+          echo "::warning title=Boot test failed::The runtime image was built but the QEMU boot test failed; see the boot-test artifact and this step's log."
+          tail -n 40 out/boot-test/report.json 2>/dev/null || true
       - name: Compress and write manifest
         run: |
           V="${{ steps.v.outputs.version }}"
