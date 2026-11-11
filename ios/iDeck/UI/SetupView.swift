@@ -39,6 +39,11 @@ struct SetupView: View {
                 if installer.needsJIT {
                     JITHelpView(onClose: {}).frame(maxWidth: .infinity)
                 }
+                if let p = installer.pausedMessage, installer.failure == nil {
+                    Card {
+                        Label(p, systemImage: "pause.circle.fill").foregroundStyle(Theme.warning)
+                    }
+                }
                 if let f = installer.failure {
                     Card {
                         VStack(alignment: .leading, spacing: 10) {
@@ -54,7 +59,7 @@ struct SetupView: View {
                     }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(installer.running)
-                    if installer.running {
+                    if installer.downloading {
                         Button("Pause Download") { installer.pauseDownloads() }.buttonStyle(SecondaryButtonStyle())
                     }
                     if case .running = runtime.phase {

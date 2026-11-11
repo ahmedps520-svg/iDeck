@@ -247,10 +247,12 @@ final class RuntimeController: ObservableObject {
         qmp.onEvent = { [weak self] event, data in
             Task { @MainActor in self?.qmpEvent(event, data) }
         }
+        // Assigned before connecting so qemuExited() can abort the wait if
+        // QEMU dies during startup.
+        self.qmp = qmp
         DiagLog.write("connecting QMP")
         try await qmp.connect(path: Paths.qmpSocket.path)
         DiagLog.write("QMP ready (QEMU main loop running)")
-        self.qmp = qmp
 
         let agent = AgentClient()
         agent.onEvent = { [weak self] event, data in
@@ -327,7 +329,7 @@ final class RuntimeController: ObservableObject {
         DiagLog.write("QEMU exited with status \(status)\(message.map { ": \($0)" } ?? "")")
         refreshTails()
         spice?.disconnect()
-        qmp?.close()
+        qmp?.abort("QEMU exited during startup (status \(status)). \(message ?? "")")
         agent?.close()
         input?.close()
         controllers.bind(to: nil)

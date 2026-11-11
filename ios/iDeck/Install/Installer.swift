@@ -19,6 +19,9 @@ final class Installer: ObservableObject {
     @Published private(set) var currentDetail = ""
     @Published private(set) var downloadSpeed: Double = 0
     @Published private(set) var needsJIT = false
+    @Published private(set) var downloading = false
+    @Published private(set) var pausedMessage: String?
+    private var pauseRequested = false
     @Published private(set) var failure: String?
     @Published private(set) var manifestSummary: String?
 
@@ -80,6 +83,7 @@ final class Installer: ObservableObject {
         guard !running else { return }
         running = true
         failure = nil
+        pausedMessage = nil
         defer { running = false }
         UIApplication.shared.isIdleTimerDisabled = true
         defer { UIApplication.shared.isIdleTimerDisabled = false }
@@ -93,9 +97,11 @@ final class Installer: ObservableObject {
             } catch is CancellationError {
                 return
             } catch let e as WaitForUser {
-                // Not a failure: the step needs the user (e.g. enable JIT).
+                // Not a failure: the step needs the user (enable JIT, resume
+                // a paused download, relaunch).
                 _ = try? journal("journal.fail", ["id": step.id, "error": e.message])
                 reloadJournal()
+                pausedMessage = e.message
                 return
             } catch {
                 _ = try? journal("journal.fail", ["id": step.id, "error": error.localizedDescription])
@@ -113,7 +119,13 @@ final class Installer: ObservableObject {
         await run()
     }
 
-    func pauseDownloads() { downloader.pause() }
+    /// Only meaningful while the runtime download step runs (the button is
+    /// only shown then). Resume data is kept for Continue Setup.
+    func pauseDownloads() {
+        guard downloading else { return }
+        pauseRequested = true
+        downloader.pause()
+    }
 
     struct WaitForUser: Error { let message: String }
 
@@ -223,10 +235,28 @@ final class Installer: ObservableObject {
         let arts = try artifacts()
         let total = arts.reduce(Int64(0)) { $0 + ((($1["size"]) as? NSNumber)?.int64Value ?? 0) }
         var before: Int64 = 0
+        downloading = true
+        pauseRequested = false
+        defer { downloading = false }
         for a in arts {
             guard let urlString = a["url"] as? String, let url = URL(string: urlString) else { continue }
             let size = (a["size"] as? NSNumber)?.int64Value ?? 0
-            _ = try await downloader.download(url, to: downloadURL(a), expectedSize: size) { [weak self] p in
+            do {
+                try await downloadOne(url, to: downloadURL(a), size: size, before: before, total: total)
+            } catch {
+                if pauseRequested {
+                    downloadSpeed = 0
+                    throw WaitForUser(message: "Download paused. Tap Continue Setup to resume where it stopped.")
+                }
+                throw error
+            }
+            before += size
+        }
+        downloadSpeed = 0
+    }
+
+    private func downloadOne(_ url: URL, to dest: URL, size: Int64, before: Int64, total: Int64) async throws {
+            _ = try await downloader.download(url, to: dest, expectedSize: size) { [weak self] p in
                 Task { @MainActor in
                     guard let self else { return }
                     self.downloadSpeed = p.bytesPerSecond
@@ -237,9 +267,6 @@ final class Installer: ObservableObject {
                                 progress: total > 0 ? Double(done) / Double(total) : 0)
                 }
             }
-            before += size
-        }
-        downloadSpeed = 0
     }
 
     private func verifyRuntime() async throws {
@@ -325,7 +352,10 @@ final class Installer: ObservableObject {
             }
             needsJIT = false
             update("boot-guest", detail: "Starting Linux for the first time (this can take a few minutes)")
-            await runtime.startGaming()
+            // Not awaited: the loop below shows each startup phase, elapsed
+            // time and the guest console while QEMU starts.
+            Task { await runtime.startGaming() }
+            try await Task.sleep(nanoseconds: 300_000_000)
         }
         // Wait for the guest agent's ready event.
         // In CI the same image reaches the agent in ~35 s under TCG; give the
@@ -344,6 +374,8 @@ final class Installer: ObservableObject {
                 throw WaitForUser(message: "Enable JIT, then continue setup")
             case .needsRelaunch:
                 throw WaitForUser(message: "Close iDeck from the app switcher and open it again to continue")
+            case .notInstalled:
+                throw Core.CallError(message: "The runtime files are missing. Use Repair Setup to reinstall them.")
             case .booting(let s), .starting(let s):
                 let elapsed = Int(Date().timeIntervalSince(started))
                 let console = runtime.consoleTail.last.map { " · \($0.prefix(90))" } ?? " · no console output yet"

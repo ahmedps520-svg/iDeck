@@ -82,6 +82,12 @@ final class QMPClient {
         }
     }
 
+    /// Aborts a pending connect (e.g. QEMU exited during startup).
+    func abort(_ message: String) {
+        failReadyWaiters(message)
+        socket.close()
+    }
+
     private func failReadyWaiters(_ message: String) {
         lock.lock()
         let waiters = readyWaiters
