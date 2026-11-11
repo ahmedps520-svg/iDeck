@@ -58,6 +58,9 @@ final class RuntimeController: ObservableObject {
     private var settings: Settings { Settings.load() }
     private var bootStarted = Date()
     private var loggedProvisionDetails = Set<String>()
+    private let spiceEvents = SpiceEventLog()
+    private var lastDisplaySummary = ""
+    private var displaySummaryLoggedAt = Date.distantPast
     private var observers: [NSObjectProtocol] = []
 
     /// "jit" for the sideload edition, "se" for the interpreter (TestFlight) edition.
@@ -250,6 +253,19 @@ final class RuntimeController: ObservableObject {
         // Memory trend every 10 s while Linux runs: if iPadOS terminates
         // iDeck (jetsam), ideck.previous.log shows what led up to it.
         tailTicks += 1
+        if tailTicks % 5 == 0, isRunning, let spice {
+            // What the display pipeline has; logged when it changes and once a
+            // minute, so a black screen can be traced to Linux or to iDeck.
+            let summary = spice.diagnosticSummary
+            if summary != lastDisplaySummary || Date().timeIntervalSince(displaySummaryLoggedAt) > 60 {
+                DiagLog.write("display: \(summary)")
+                lastDisplaySummary = summary
+                displaySummaryLoggedAt = Date()
+            }
+        }
+        if tailTicks % 15 == 0, isRunning, let spice {
+            spice.saveSnapshot(to: Paths.displaySnapshot) { _ in }
+        }
         if tailTicks % 5 == 0 && (isRunning || phase == .stopping) {
             DiagLog.write("mem: footprint \(IDPlatform.physFootprint >> 20) MiB, available \(IDPlatform.availableMemory >> 20) MiB, "
                           + "guest used \(metrics.memUsedKB >> 10)/\(metrics.memTotalKB >> 10) MiB, pressure \(memory.sample.level), "
@@ -416,7 +432,19 @@ final class RuntimeController: ObservableObject {
         }
         let spice = IDSpiceClient(socketPath: Paths.spiceSocket.path)
         spice.audioEnabled = settings.audio
+        spiceEvents.onChange = { [weak self] connected in
+            Task { @MainActor in self?.displayConnected = connected }
+        }
+        spice.delegate = spiceEvents
         self.spice = spice
+        // Display setup (scanout, monitor config) in detail for the first two
+        // minutes; per-frame messages make it too noisy to keep on.
+        IDSpiceClient.setVerboseLogging(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) {
+            IDSpiceClient.setVerboseLogging(false)
+            DiagLog.write("display: verbose SPICE logging off")
+        }
+        try? FileManager.default.removeItem(at: Paths.displaySnapshot)
         let spiceOK = spice.connect()
         DiagLog.write("SPICE connect started: \(spiceOK)")
         if !spiceOK { warnings.append("SPICE display connection failed; retrying when the view appears.") }

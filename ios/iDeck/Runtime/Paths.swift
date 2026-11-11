@@ -63,9 +63,11 @@ enum Paths {
     /// Trace of the previous app session (the one that closed, if it did).
     static var previousAppLog: URL { logs.appendingPathComponent("ideck.previous.log") }
     static var crashLog: URL { logs.appendingPathComponent("crash.log") }
+    /// The last frame the display client received from Linux.
+    static var displaySnapshot: URL { logs.appendingPathComponent("display.png") }
     /// Every log worth sending when something went wrong.
     static var allLogs: [URL] {
-        [appLog, previousAppLog, crashLog, qemuLog, consoleLog].filter { fm.fileExists(atPath: $0.path) }
+        [appLog, previousAppLog, crashLog, qemuLog, consoleLog, displaySnapshot].filter { fm.fileExists(atPath: $0.path) }
     }
 
     static var activeRuntimeVersion: String? {

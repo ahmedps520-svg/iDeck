@@ -55,6 +55,16 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 - (void)requestRelativeMouse:(BOOL)relative NS_SWIFT_NAME(requestRelativeMouse(_:));
 @property (nonatomic, readonly) BOOL relativeMouseMode;
 
+/// spice-gtk / CocoaSpice debug messages (scanout, monitor config) go to the
+/// QEMU log while on. Per-frame messages too, so only for a short window.
++ (void)setVerboseLogging:(BOOL)enabled NS_SWIFT_NAME(setVerboseLogging(_:));
+/// One line describing what the display pipeline has: display channel,
+/// size, whether a frame texture exists, renderer and view sizes.
+@property (nonatomic, readonly) NSString *diagnosticSummary;
+/// Writes the frame CocoaSpice last received as a PNG (what Linux sent,
+/// before it is drawn on screen). Completion runs on the main queue.
+- (void)saveSnapshotToURL:(NSURL *)url completion:(void (^)(BOOL ok))completion NS_SWIFT_NAME(saveSnapshot(to:completion:));
+
 @end
 
 /// PC XT (set 1) scancode for a USB HID keyboard usage, as spice-gtk expects

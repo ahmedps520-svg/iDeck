@@ -178,6 +178,19 @@ QEMU 8.2 TCG on `ubuntu-24.04-arm`, no GPU and no sound device.
 - The client wrote crash dumps and uploaded them to Valve's crash reporter (`CrashID=bp-…`). That is Steam's own behaviour, not iDeck's.
 - GL and Vulkan (llvmpipe) and audio (`auto_null`) failed as expected on the runner.
 
+### Device run, build 17 with runtime 0.1.4 (iPad17,2, iPadOS 27.2)
+
+- Reported by the user: setup finished without iDeck closing.
+- "Resume Steam" showed a black screen with no mouse pointer. Guest CPU stayed at 8–11%, so Steam was not busy updating.
+- `qemu.log`: all SPICE channels opened (main, display, cursor, inputs, playback). No virtio-gpu or GL errors.
+- `console.log`: `ideck-session.service` (Xorg) and the deck user session started.
+- Nothing in the app recorded the display client's state: no object was registered for its events, so `ideck.log` had no display lines.
+- Build 18 adds display diagnostics:
+  - display events in the log;
+  - a state line (channel, size, frame texture, renderer and view);
+  - `display.png`, the last frame received from Linux, included in Share logs;
+  - CocoaSpice and spice-gtk debug output for the first two minutes.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

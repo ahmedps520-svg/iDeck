@@ -138,6 +138,54 @@ static CSInputButton CSButtons(IDMouseButton b) {
     [self.input requestMouseMode:relative];
 }
 
+#pragma mark - Diagnostics
+
++ (void)setVerboseLogging:(BOOL)enabled {
+    if (enabled) {
+        // CocoaSpice's own messages use no log domain; spice_util_set_debug
+        // only adds "GSpice" to G_MESSAGES_DEBUG.
+        setenv("G_MESSAGES_DEBUG", "all", 1);
+    }
+    [CSMain.sharedInstance spiceSetDebug:enabled];
+}
+
+- (NSString *)diagnosticSummary {
+    CSDisplay *d = self.display;
+    MTKView *v = self.view;
+    NSMutableString *s = [NSMutableString stringWithFormat:@"connected %d, input %d",
+                          self.connected, self.input != nil];
+    if (!d) {
+        [s appendString:@", no primary display channel"];
+    } else {
+        id<MTLTexture> t = d.texture;
+        [s appendFormat:@", display %ld %.0fx%.0f visible %d texture %@ vertices %d cursor %d",
+         (long)d.monitorID, d.displaySize.width, d.displaySize.height, d.isVisible,
+         t ? [NSString stringWithFormat:@"%lux%lu", (unsigned long)t.width, (unsigned long)t.height] : @"none",
+         d.vertices != nil, d.cursor != nil];
+    }
+    if (self.renderer && v) {
+        [s appendFormat:@", view %.0fx%.0f scale %.3f paused %d", v.drawableSize.width, v.drawableSize.height,
+         self.renderer.viewportScale, v.isPaused];
+    } else {
+        [s appendString:@", no view attached"];
+    }
+    return s;
+}
+
+- (void)saveSnapshotToURL:(NSURL *)url completion:(void (^)(BOOL))completion {
+    CSDisplay *d = self.display;
+    if (!d) {
+        completion(NO);
+        return;
+    }
+    [d screenshotWithCompletion:^(CSScreenshot *shot) {
+        if (shot) [shot writeToURL:url atomically:YES];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(shot != nil);
+        });
+    }];
+}
+
 #pragma mark - CSConnectionDelegate (called on the SPICE thread)
 
 - (void)onMain:(dispatch_block_t)block {
