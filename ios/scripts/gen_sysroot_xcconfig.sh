@@ -12,6 +12,15 @@ for fw in "$SYSROOT"/Frameworks/*.framework; do
     case "$name" in
         qemu-*-softmmu) continue ;;   # dlopen'ed
     esac
+    # Frameworks built with -allowable_client (ANGLE's GLESv2/EGL, ...) may
+    # only be linked by the libraries named there (QEMU, virglrenderer). They
+    # are still embedded; the app itself must not link them.
+    bin="$fw/$name"
+    [ -f "$bin" ] || bin="$fw/Versions/Current/$name"
+    if command -v otool >/dev/null && [ -f "$bin" ] && otool -l "$bin" | grep -q LC_SUB_CLIENT; then
+        echo "skipping $name (restricted to allowable clients)"
+        continue
+    fi
     flags+=("-framework" "\"$name\"")
 done
 # Static GStreamer plugins used by spice-gtk audio playback.
