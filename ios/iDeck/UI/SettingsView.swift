@@ -42,6 +42,8 @@ struct SettingsView: View {
                     .onChange(of: model.settings.steamBeta) { _ in applySteam() }
                 Toggle("Software-rendered Steam UI (compatibility)", isOn: $model.settings.steamSoftwareUI)
                     .onChange(of: model.settings.steamSoftwareUI) { _ in applySteam() }
+                Toggle("Lightweight Steam (no Friends & Chat window)", isOn: $model.settings.steamLightweight)
+                    .onChange(of: model.settings.steamLightweight) { _ in applySteam() }
                 Toggle("FPS overlay in games (MangoHud)", isOn: $model.settings.showPerformanceOverlay)
             }
             Section("Audio & feedback") {

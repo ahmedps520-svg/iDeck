@@ -220,15 +220,20 @@ final class DisplayViewController: UIViewController, UIKeyInput {
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         let twoTap = UITapGestureRecognizer(target: self, action: #selector(rightClick(_:)))
         twoTap.numberOfTouchesRequired = 2
+        // One finger on the screen scrolls what is under it (or moves the
+        // captured mouse in games); a trackpad click-drag drags.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
         pan.maximumNumberOfTouches = 1
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+        let pointerDrag = UIPanGestureRecognizer(target: self, action: #selector(pointerDragged(_:)))
+        pointerDrag.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirectPointer.rawValue)]
         let scroll = UIPanGestureRecognizer(target: self, action: #selector(scrolled(_:)))
         scroll.minimumNumberOfTouches = 2
         scroll.allowedScrollTypesMask = .continuous
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
         let long = UILongPressGestureRecognizer(target: self, action: #selector(longPressed(_:)))
         long.minimumPressDuration = 0.45
-        [tap, twoTap, pan, scroll, hover, long].forEach(view.addGestureRecognizer)
+        [tap, twoTap, pan, pointerDrag, scroll, hover, long].forEach(view.addGestureRecognizer)
         tap.require(toFail: twoTap)
 
         mouseObserver = NotificationCenter.default.addObserver(forName: .GCMouseDidConnect, object: nil, queue: .main) {
@@ -313,19 +318,58 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     }
 
     @objc private func panned(_ r: UIPanGestureRecognizer) {
-        // One-finger drag moves the pointer (trackpad-style when captured).
         if mouseCaptured {
+            // Games: one-finger drag is trackpad-style relative motion.
             let t = r.translation(in: view)
             spice.sendMouseRelative(CGPoint(x: t.x - lastPan.x, y: t.y - lastPan.y), buttons: buttons)
             lastPan = r.state == .ended ? .zero : t
         } else {
-            spice.sendMouseAbsolute(guestPoint(r.location(in: view)), buttons: buttons)
+            // Desktop (Steam): one-finger drag scrolls, like any iPad app.
+            // Before, it only moved the pointer, so nothing scrolled.
+            scrolled(r)
         }
     }
 
+    /// Finger travel per scroll-wheel notch (Chromium scrolls about three
+    /// lines per notch).
+    private static let pointsPerNotch: CGFloat = 22
+    private var lastScrollY: CGFloat = 0
+
     @objc private func scrolled(_ r: UIPanGestureRecognizer) {
-        let v = r.velocity(in: view)
-        if abs(v.y) > 1 { spice.sendScroll(-v.y / 400, buttons: buttons) }
+        switch r.state {
+        case .began:
+            lastScrollY = 0
+            // Aim the wheel at the content under the fingers.
+            spice.sendMouseAbsolute(guestPoint(r.location(in: view)), buttons: buttons)
+        case .changed:
+            // Distance, not velocity: a slow drag scrolls as far as a fast
+            // one. Finger up -> content follows the finger -> wheel down.
+            let y = r.translation(in: view).y
+            spice.sendScroll(-(y - lastScrollY) / DisplayViewController.pointsPerNotch, buttons: buttons)
+            lastScrollY = y
+        default:
+            lastScrollY = 0
+        }
+    }
+
+    @objc private func pointerDragged(_ r: UIPanGestureRecognizer) {
+        // Trackpad or mouse click-and-drag: select text, drag windows.
+        if mouseCaptured {
+            panned(r)
+            return
+        }
+        let p = guestPoint(r.location(in: view))
+        switch r.state {
+        case .began:
+            spice.sendMouseAbsolute(p, buttons: [])
+            buttons.insert(.left)
+            spice.sendMouseButton(.left, pressed: true, buttons: buttons)
+        case .changed:
+            spice.sendMouseAbsolute(p, buttons: buttons)
+        default:
+            buttons.remove(.left)
+            spice.sendMouseButton(.left, pressed: false, buttons: buttons)
+        }
     }
 
     @objc private func hovered(_ r: UIHoverGestureRecognizer) {

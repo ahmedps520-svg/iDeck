@@ -17,6 +17,7 @@ IDECK_STEAM_BIGPICTURE=0
 IDECK_STEAM_BETA=0
 IDECK_STEAM_CEF_NOGPU=0
 IDECK_MANGOHUD=0
+IDECK_STEAM_LIGHT=1
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
     . /var/lib/ideck/steam.env
@@ -43,6 +44,8 @@ args=(-noverifyfiles)
 [ "$IDECK_STEAM_BIGPICTURE" = 1 ] && args+=(-gamepadui)
 # Software rendering for the Steam UI (CEF) only; games still use the GPU.
 [ "$IDECK_STEAM_CEF_NOGPU" = 1 ] && args+=(-cef-disable-gpu -cef-disable-gpu-compositing)
+# Fewer web views for the emulated CPU: no Friends list or Chat window.
+[ "$IDECK_STEAM_LIGHT" = 1 ] && args+=(-nofriendsui -nochatui)
 
 # In-game FPS / frame-time overlay (MangoHud Vulkan layer; inherited by games).
 if [ "$IDECK_MANGOHUD" = 1 ]; then

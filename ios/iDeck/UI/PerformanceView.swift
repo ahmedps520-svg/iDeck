@@ -38,7 +38,8 @@ struct PerformanceView: View {
                             .onChange(of: model.settings.showPerformanceOverlay) { _ in
                                 Task { _ = try? await runtime.agent?.request("steam.configure", [
                                     "bigpicture": model.settings.steamBigPicture, "beta": model.settings.steamBeta,
-                                    "cef_software": model.settings.steamSoftwareUI, "overlay": model.settings.showPerformanceOverlay]) }
+                                    "cef_software": model.settings.steamSoftwareUI, "overlay": model.settings.showPerformanceOverlay,
+                                    "lightweight": model.settings.steamLightweight]) }
                             }
                         Text("Takes effect for games started after Steam restarts.").font(.caption).foregroundStyle(Theme.textTertiary)
                     }

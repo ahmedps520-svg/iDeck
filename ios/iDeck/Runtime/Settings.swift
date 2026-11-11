@@ -45,6 +45,9 @@ struct Settings: Codable, Equatable {
     var steamBigPicture = false
     var steamBeta = false
     var steamSoftwareUI = false            // CEF without GPU (compatibility)
+    /// Skips Steam's Friends and Chat UI (-nofriendsui -nochatui): fewer
+    /// web views for the emulated CPU to run. Needs runtime 0.1.6.
+    var steamLightweight = true
     var refreshHz = 60
     var audio = true
     var notifications = true

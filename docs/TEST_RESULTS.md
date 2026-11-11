@@ -229,6 +229,18 @@ From `linux-steam.log`, `ideck.log` and `display.png`:
 | `lsof` / `lspci` missing | `lsof` and `pciutils` added to the image (runtime 0.1.5) |
 | Steam windows unpainted | not fixed yet; next test is Settings › Software-rendered Steam UI (`-cef-disable-gpu -cef-disable-gpu-compositing`) |
 
+### Device run, build 21 with runtime 0.1.5: Steam UI usable (user report)
+
+Reported by the user, 2026-11-11; no screenshot or logs from this session yet:
+- "ITS WORKING WE ARE IN STEAM": the Steam client UI rendered on the iPad. Settings › Software-rendered Steam UI was on, so CEF ran without GPU (`-cef-disable-gpu -cef-disable-gpu-compositing`), and build 21 restarted Steam for the option to apply.
+- The UI was "very laggy and heavy" with no game open.
+- Scrolling did not work. In builds up to 21, one-finger drag only moved the pointer, and two-finger drag sent wheel steps derived from finger velocity.
+- Supermarket Simulator (a Windows game) installed. Pressing Play showed "Running" but no game window appeared. That path runs Proton (x86-64) under FEX inside TCG, and DXVK on Vulkan llvmpipe, because Venus is off without an app group. Logs from the launch are still needed.
+
+Build 22: one-finger drag scrolls (wheel notches by finger distance), two-finger and trackpad scrolling use the same distance-based mapping, and trackpad click-drag is a left-button drag. Runtime 0.1.7:
+- adds Lightweight Steam (`-nofriendsui -nochatui`, on by default);
+- makes the agent queue Steam start, stop and restart without blocking.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |
