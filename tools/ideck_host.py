@@ -238,8 +238,11 @@ def main() -> int:
         log("provision", prov, ok=prov.get("state") == "done")
         if a.steam_software_ui:
             # Same path as the app: write the launch options, restart Steam.
-            agent.request("steam.configure", {"cef_software": True})
-            log("steam-software-ui", agent.request("steam.restart", timeout=120))
+            try:
+                agent.request("steam.configure", {"cef_software": True})
+                log("steam-software-ui", agent.request("steam.restart", timeout=120))
+            except Exception as e:  # noqa: BLE001  (keep observing Steam either way)
+                log("steam-software-ui", str(e), ok=False)
         log("steam-status", agent.request("steam.status"))
 
         if not a.skip_bench:

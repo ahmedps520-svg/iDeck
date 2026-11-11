@@ -166,8 +166,14 @@ Reply execute_slow(const Job& job) {
     };
     if (job.op == "steam.start" || job.op == "steam.stop" || job.op == "steam.restart") {
         std::string verb = job.op.substr(6);
-        rep.result = run_to_json({"systemctl", verb, "ideck-steam.service"}, 30000);
-        if (rep.result["exit_code"].as_int() != 0) return fail("systemctl " + verb + " failed");
+        // --no-block: queue the job and return. Stopping Steam can take up
+        // to the unit's 30 s TimeoutStopSec, so waiting for a restart ran
+        // past this call's own timeout and reported a failure (runtime
+        // 0.1.5 boot test).
+        rep.result = run_to_json({"systemctl", "--no-block", verb, "ideck-steam.service"}, 15000);
+        if (rep.result["exit_code"].as_int() != 0) {
+            return fail("systemctl " + verb + " failed: " + rep.result["output"].as_string());
+        }
         return rep;
     }
     if (job.op == "steam.status") {
