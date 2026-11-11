@@ -46,7 +46,8 @@ trap 'umount -R "$ROOT/proc" "$ROOT/sys" "$ROOT/dev" 2>/dev/null || true' EXIT
 if [ -n "$SNAPSHOT" ]; then
     MIRROR="http://snapshot.debian.org/archive/debian/$SNAPSHOT"
     SECURITY="http://snapshot.debian.org/archive/debian-security/$SNAPSHOT"
-    export SOURCE_DATE_EPOCH="$(date -d "${SNAPSHOT:0:8}" +%s)"
+    SOURCE_DATE_EPOCH="$(date -d "${SNAPSHOT:0:8}" +%s)"
+    export SOURCE_DATE_EPOCH
 fi
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$HERE" log -1 --format=%ct 2>/dev/null || date +%s)}"
 
