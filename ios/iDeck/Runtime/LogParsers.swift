@@ -9,8 +9,7 @@ enum SessionLogParsing {
     /// "=== iDeck crash: SIGTRAP (5) at 0x... code 0 thread '?' time 1794402737".
     static func crashSignal(in crashLog: String, since: Double) -> String? {
         var found: String?
-        for line in crashLog.split(separator: "
-") where line.hasPrefix("=== iDeck crash: ") {
+        for line in crashLog.split(separator: "\n") where line.hasPrefix("=== iDeck crash: ") {
             let words = line.split(separator: " ")
             guard let t = words.lastIndex(of: "time"), t + 1 < words.count,
                   let when = Double(words[t + 1]), when >= since.rounded(.down) else { continue }
