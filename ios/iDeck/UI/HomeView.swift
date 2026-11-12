@@ -10,6 +10,10 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 hero
+                if let notice = runtime.previousSessionNotice {
+                    NoticeCard(icon: "exclamationmark.triangle.fill", title: "The last session ended unexpectedly",
+                               message: notice) { runtime.previousSessionNotice = nil }
+                }
                 if !library.recent.isEmpty {
                     SectionHeader(title: "Recently Played")
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -70,6 +74,33 @@ struct HomeView: View {
             .padding(32)
         }
         .frame(minHeight: 280)
+    }
+}
+
+/// A dismissible note under the hero (for example after iOS closed iDeck
+/// while Linux was running).
+struct NoticeCard: View {
+    var icon: String
+    var title: String
+    var message: String
+    var onDismiss: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: icon).font(.title2).foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.headline).foregroundStyle(.white)
+                Text(message).font(.subheadline).foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button(action: onDismiss) {
+                Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(Theme.textSecondary)
+            }
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.surfaceRaised))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Theme.warning.opacity(0.35)))
     }
 }
 

@@ -27,6 +27,10 @@ final class MemoryMonitor: ObservableObject {
             guard let self, let s = self.source else { return }
             let ev = s.data
             let level = ev.contains(.critical) ? "critical" : ev.contains(.warning) ? "warning" : "normal"
+            // System-wide pressure (not only this app's limit): logged so a
+            // session that iOS ends can be matched to it.
+            DiagLog.write("memory pressure from iOS: \(level) (footprint \(IDPlatform.physFootprint >> 20) MiB, "
+                          + "available \(IDPlatform.availableMemory >> 20) MiB)")
             self.react(level)
         }
         src.resume()
@@ -60,6 +64,7 @@ final class MemoryMonitor: ObservableObject {
         let request = PressureRequest(level: level, guestMb: guestMb, usedGuestMb: guestUsedMb)
         guard let actions = try? Core.call("memory.pressure", request, as: PressureActions.self) else { return }
         lastAction = "\(level): balloon \(actions.balloonTargetMb) MiB" + (actions.dropGuestCaches ? ", dropped caches" : "")
+        DiagLog.write("memory: \(level) -> \(lastAction ?? "")")
         Task { await apply?(actions) }
     }
 }

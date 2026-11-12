@@ -140,14 +140,82 @@ final class RuntimeController: ObservableObject {
                       + "extended-virtual-addressing \(IDPlatform.hasExtendedVirtualAddressing); \(Device.summary)")
         DiagLog.write("signature: app groups \((IDPlatform.signedEntitlements?["com.apple.security.application-groups"] as? [String]) ?? []), "
                       + "candidates \(IDPlatform.applicationGroupCandidates), GPU shared memory \(RuntimeController.sharedMemory.summary)")
+        if let previous = SessionMarker.takePrevious() {
+            DiagLog.write(previous.logLine)
+            previousSessionNotice = previous.userMessage
+        }
         refreshInstalledState()
         memory.apply = { [weak self] actions in await self?.applyPressure(actions) }
         memory.start()
         let nc = NotificationCenter.default
         observers.append(nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil,
                                         queue: .main) { [weak self] _ in
-            Task { @MainActor in await self?.didReturnToForeground() }
+            Task { @MainActor in
+                self?.logAppState("foreground")
+                await self?.didReturnToForeground()
+            }
         })
+        // Where the app was when a session ends without a crash report: the
+        // next launch reads the last "app:" line (SessionMarker).
+        let states: [(Notification.Name, String)] = [
+            (UIApplication.didBecomeActiveNotification, "active"),
+            (UIApplication.willResignActiveNotification, "inactive"),
+            (UIApplication.willTerminateNotification, "terminating"),
+            (UIApplication.didReceiveMemoryWarningNotification, "memory-warning"),
+            (ProcessInfo.thermalStateDidChangeNotification, "thermal"),
+        ]
+        for (name, label) in states {
+            observers.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.logAppState(label) }
+            })
+        }
+        observers.append(nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil,
+                                        queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.didEnterBackground() }
+        })
+    }
+
+    /// Shown once on the home screen when the previous session ended while
+    /// Linux was running.
+    @Published var previousSessionNotice: String?
+
+    private func logAppState(_ state: String) {
+        DiagLog.write("app: \(state) (Linux \(phase.traceLabel), footprint \(IDPlatform.physFootprint >> 20) MiB, "
+                      + "available \(IDPlatform.availableMemory >> 20) MiB, thermal \(RuntimeController.thermalLabel), "
+                      + "traced \(IDPlatform.isTraced))")
+    }
+
+    static var thermalLabel: String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// iOS suspends iDeck a few seconds after it leaves the screen (and may
+    /// then close it to free memory). Linux gets those seconds to write its
+    /// page cache to the library disk, so a closed session loses less (a
+    /// Steam update in progress, downloads).
+    private func didEnterBackground() {
+        logAppState("background")
+        guard case .running = phase, let agent else { return }
+        let app = UIApplication.shared
+        let task = BackgroundTaskBox()
+        task.id = app.beginBackgroundTask(withName: "ideck.sync-linux") {
+            DiagLog.write("app: background time ran out before Linux finished syncing")
+            task.finish()
+        }
+        let started = Date()
+        Task { @MainActor in
+            let ok = (try? await agent.request("fs.sync", timeout: 20)) != nil
+            DiagLog.write("app: Linux disks synced for the background: \(ok ? "ok" : "failed") "
+                          + "after \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
+            await self.captureGuestLogs()
+            task.finish()
+        }
     }
 
     var isRunning: Bool {
@@ -304,8 +372,17 @@ final class RuntimeController: ObservableObject {
         if tailTicks % 15 == 0, isRunning, let spice {
             spice.saveSnapshot(to: Paths.displaySnapshot) { _ in }
         }
+        // Linux journals: 20 s after the agent is up (on device a session
+        // ended before the old first capture at 60 s), then every 30 s, and
+        // every 6 s while Steam installs a client update (progress banner).
+        if case .running = phase, let up = runningSince {
+            let firstDue = !firstCaptureDone && Date().timeIntervalSince(up) >= 20
+            if firstDue || tailTicks % (steamUpdate == nil ? 15 : 3) == 0 {
+                if firstDue { firstCaptureDone = true }
+                Task { await captureGuestLogs() }
+            }
+        }
         if tailTicks % 30 == 0, case .running = phase {
-            Task { await captureGuestLogs() }
             if RuntimeController.sharedMemory.fileFallback {
                 let stats = RuntimeController.sharedMemoryStats
                 if stats != lastSharedMemoryStats {
@@ -317,7 +394,8 @@ final class RuntimeController: ObservableObject {
         if tailTicks % 5 == 0 && (isRunning || phase == .stopping) {
             DiagLog.write("mem: footprint \(IDPlatform.physFootprint >> 20) MiB, available \(IDPlatform.availableMemory >> 20) MiB, "
                           + "guest used \(metrics.memUsedKB >> 10)/\(metrics.memTotalKB >> 10) MiB, pressure \(memory.sample.level), "
-                          + "guest cpu \(Int(metrics.cpuPercent))%")
+                          + "guest cpu \(Int(metrics.cpuPercent))%, traced \(IDPlatform.isTraced), "
+                          + "thermal \(RuntimeController.thermalLabel), disk free \(StorageManager.usage().free >> 20) MiB")
         }
     }
 
@@ -419,6 +497,7 @@ final class RuntimeController: ObservableObject {
             [weak self] status, message in
             Task { @MainActor in self?.qemuExited(status: status, message: message) }
         }
+        SessionMarker.begin(runtime: files.version)
         memory.guestMb = plan.guestMb
 
         phase = .booting("Connecting to Linux")
@@ -521,6 +600,8 @@ final class RuntimeController: ObservableObject {
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running
+            runningSince = Date()
+            firstCaptureDone = false
             Task { await afterGuestReady() }
         case "metrics":
             var m = GuestMetrics()
@@ -538,7 +619,10 @@ final class RuntimeController: ObservableObject {
             metrics = m
             memory.guestUsedMb = m.memUsedKB >> 10
             StorageManager.recordGuestUsage(used: m.libraryUsed, size: m.librarySize)
-            Task { await growLibraryIfNeeded() }
+            if Date().timeIntervalSince(storageCheckedAt) > 30 {
+                storageCheckedAt = Date()
+                Task { await growLibraryIfNeeded() }
+            }
         case "provision":
             provision = data
             let steps = (data["steps"] as? [[String: Any]] ?? []).map { s -> String in
@@ -570,6 +654,8 @@ final class RuntimeController: ObservableObject {
 
     private func qemuExited(status: Int32, message: String?) {
         DiagLog.write("QEMU exited with status \(status)\(message.map { ": \($0)" } ?? "")")
+        SessionMarker.end()
+        steamUpdate = nil
         refreshTails()
         spice?.disconnect()
         qmp?.abort("QEMU exited during startup (status \(status)). \(message ?? "")")
@@ -595,6 +681,10 @@ final class RuntimeController: ObservableObject {
 
     private var capturingGuestLogs = false
     private var lastSteamState = ""
+    private var runningSince: Date?
+    private var firstCaptureDone = false
+    /// Steam's own client update while it runs (nil otherwise).
+    @Published private(set) var steamUpdate: SteamUpdateState?
 
     /// Saves the Steam, X session and provisioning journals from Linux next
     /// to the app logs (Share logs includes them) and notes Steam's state in
@@ -606,10 +696,18 @@ final class RuntimeController: ObservableObject {
         let units: [(String, Int, URL)] = [("ideck-steam.service", 400, Paths.guestSteamLog),
                                            ("ideck-session.service", 150, Paths.guestSessionLog),
                                            ("ideck-provision.service", 150, Paths.guestProvisionLog)]
+        let iso = ISO8601DateFormatter()
+        // Which session a saved journal belongs to: on device (build 23) the
+        // shared linux-*.log files came from an earlier session than ideck.log.
+        let header = "# captured \(iso.string(from: Date())) by iDeck pid \(getpid()), Linux up since "
+            + "\(runningSince.map { iso.string(from: $0) } ?? "?")\n"
         for (unit, lines, url) in units {
+            // While Steam updates (read every 6 s) only its journal is needed.
+            if steamUpdate != nil, unit != "ideck-steam.service" { continue }
             guard let r = try? await agent.requestDict("logs", ["unit": unit, "lines": lines], timeout: 30),
                   let out = r["output"] as? String else { continue }
-            try? Data(out.utf8).write(to: url, options: .atomic)
+            try? Data((header + out).utf8).write(to: url, options: .atomic)
+            if unit == "ideck-steam.service" { noteSteamUpdate(SteamUpdateState.parse(out)) }
         }
         if let st = try? await agent.requestDict("steam.status", [:], timeout: 15) {
             let pids = (st["pids"] as? [Any])?.count ?? 0
@@ -619,6 +717,14 @@ final class RuntimeController: ObservableObject {
                 lastSteamState = state
             }
         }
+    }
+
+    private func noteSteamUpdate(_ state: SteamUpdateState?) {
+        guard state != steamUpdate else { return }
+        if state?.stage != steamUpdate?.stage || state == nil {
+            DiagLog.write("steam update: \(state?.summary ?? "none in progress")")
+        }
+        steamUpdate = state
     }
 
     private func afterGuestReady() async {
@@ -686,10 +792,16 @@ final class RuntimeController: ObservableObject {
     }
 
     private var growing = false
+    private var storageCheckedAt = Date.distantPast
     private func growLibraryIfNeeded() async {
-        guard !growing, let decision = StorageManager.decide(), decision.grow else { return }
+        guard !growing else { return }
         growing = true
         defer { growing = false }
+        // decide() asks iOS for the free space it would make available
+        // (volumeAvailableCapacityForImportantUsage), which can take a while
+        // under heavy disk writes; it ran on the main thread every 2 s.
+        let decision = await Task.detached(priority: .utility) { StorageManager.decide() }.value
+        guard let decision, decision.grow else { return }
         do {
             try StorageManager.growDataDisk(to: decision.newSize)
             try await qmp?.resizeBlock(node: "data", bytes: decision.newSize)
@@ -773,5 +885,17 @@ extension RuntimeController.Phase {
     var traceLabel: String {
         if case .failed(let m) = self { return "failed: \(m)" }
         return label
+    }
+}
+
+/// A UIKit background task that is ended once, by whichever comes first:
+/// the work finishing or iOS's expiry handler. Used on the main thread only.
+final class BackgroundTaskBox {
+    var id: UIBackgroundTaskIdentifier = .invalid
+
+    func finish() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

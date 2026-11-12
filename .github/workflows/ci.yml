@@ -66,6 +66,19 @@ jobs:
             build/shm/shm_fallback_test denied "$PWD/build/shm/libshm_user.dylib" | tee build/shm/denied.txt
           if grep -q '^SKIP' build/shm/denied.txt; then echo "::warning::sandbox-exec did not refuse shm_open"; fi
 
+  log-parsers:
+    name: Session and Steam update log parsing (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          mkdir -p build/parsers
+          swiftc -warnings-as-errors -o build/parsers/log_parsers \
+            ios/iDeck/Runtime/LogParsers.swift ios/tests/log_parsers/main.swift
+      - name: Run
+        run: build/parsers/log_parsers
+
   guest-binaries:
     name: Guest binaries (aarch64-linux-musl)
     runs-on: ubuntu-24.04

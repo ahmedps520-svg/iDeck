@@ -291,6 +291,37 @@ Evidence so far:
 - At 676 s the first non-blank screen showed Steam's "Steamwebhelper is not responding" dialog. It is byte-identical to the 0.1.4 screenshot, so the CI result has neither improved nor regressed. The UI still does not load in the CI VM.
 - zram swap is not created here: the CI guest has 4 GiB, above the 3.5 GiB threshold.
 
+### Device run, build 23 with runtime 0.1.8: sessions end while Steam updates (2026-11-12)
+
+The user reported "It crashed" and shared logs from iPad17,2, iPadOS 27.2.
+
+- **The app was build 23, not 24.** The launch line has no `RAM … cores …` fields (added in build 24). The signature line says "GPU shared memory unavailable" instead of the build 24 file fallback, and the log has `vulkan: off`. The Venus file fallback is therefore still untested on a device.
+- Runtime 0.1.8 was active: Steam ran with `-noverifyfiles -nofriendsui -nochatui -no-cef-sandbox`, and the provisioning, zram and self-test steps ran. Self-test passed 16/17; the failing check was Vulkan on llvmpipe, as expected with Vulkan off.
+- **Valve published a Steam client update** (installed 1792618285 → 1794424036). Steam downloaded 574,010 KB in about 27 s, then logged "Installing update… Extracting package…". In the CI journal (runtime 0.1.6) the same stage took about 6.5 min under emulation:
+  - extracting: 4 min 48 s;
+  - installing to cleaning up: 1 min 42 s;
+  - then "Update complete, launching Steam…".
+
+  During that time only the small updater window is on screen.
+- Three app sessions within four minutes, all launched with JIT (`traced true`). The exact moments the first two ended are not in the logs.
+  - **A**, about 04:07: its saved Linux journals end in "Extracting package…" at 04:08:08. The session ended before 04:09:50.
+  - **B**, 04:09:50: the last line is at 04:10:29, 37 s after boot started. Footprint was flat at 971–981 MiB with 4.1 GiB of headroom, and memory pressure was "normal".
+  - **C**, 04:10:41: still running when the logs were shared. Steam logged "didn't shutdown cleanly" and the update started again.
+- `crash.log` had only one entry, from 2026-11-11 13:12 UTC: SIGTRAP in `tcg_region_init`, the unanswered JIT request seen in build 16. Sessions A and B therefore did not end with a signal that the handler sees. That leaves SIGKILL: an iOS memory or watchdog kill, the app switcher, or StikDebug launching iDeck again. The logs cannot tell these apart, because build 23 recorded no app lifecycle, memory-pressure or debugger state.
+- The shared `linux-*.log` files came from session A, not from the session in `ideck.log`. The first journal capture was at 60 s, so B never saved its own.
+- `display.png` (session C) shows the Steam updater window with grey, unpainted Steam windows around it.
+
+| Finding | Change (build 25) |
+|---|---|
+| No record of why a session ended | Linux sessions are recorded in `linux-session.json`. At the next launch iDeck logs `previous session: … ended without a crash signal` (or the crash signal), with the last app state. The home screen shows a notice explaining it |
+| No lifecycle, pressure or debugger state in the trace | `app: active / inactive / background / foreground / memory-warning / thermal / terminating` lines; `memory pressure from iOS: …` and pressure actions are logged; the 10 s `mem:` line adds `traced`, thermal state and free disk space |
+| Leaving the app froze Linux mid-write | On entering the background iDeck takes a background task, runs `fs.sync` in Linux and saves the journals before iOS suspends it |
+| Journals from an earlier session were shared | First capture 20 s after the agent is ready, then every 30 s. Each file starts with a `# captured … by iDeck pid …, Linux up since …` header |
+| The Steam update looked like a hang | iDeck reads Steam's journal and shows "Steam is downloading a client update: X of Y MB" or "…installing…" over the display (every 6 s while it runs) |
+| `StorageManager.decide()` (iOS "important usage" free-space query) ran on the main thread on every 2 s metrics event | Runs off the main thread, at most every 30 s |
+
+Parsing is checked in CI (`log-parsers` job) against the journal lines above. What actually ends sessions on the device is **not yet known**.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

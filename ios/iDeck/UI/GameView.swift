@@ -36,7 +36,11 @@ struct GameView: View {
         switch runtime.phase {
         case .running:
             VStack {
-                HStack {
+                HStack(alignment: .top) {
+                    if let update = runtime.steamUpdate {
+                        SteamUpdateBanner(update: update)
+                            .padding(.leading, 14).padding(.top, 14)
+                    }
                     Spacer()
                     Menu {
                         Button { captureMouse.toggle() } label: {
@@ -80,6 +84,29 @@ struct GameView: View {
             MessageOverlay(icon: "power", title: "Linux is not running", message: "Tap Start Gaming on the home screen.",
                            action: ("Back to iDeck", { model.showGame = false }))
         }
+    }
+}
+
+/// Steam installs client updates before its window appears; under
+/// emulation that takes minutes with only the small updater window on screen,
+/// which looked like a hang on device.
+struct SteamUpdateBanner: View {
+    var update: SteamUpdateState
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(update.summary, systemImage: "arrow.down.circle")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+            if update.stage == .downloading, update.totalKB > 0 {
+                ProgressView(value: Double(update.doneKB), total: Double(update.totalKB)).tint(Theme.accent)
+            }
+            Text("Keep iDeck open: this can take several minutes, and Steam's window appears when it is done.")
+                .font(.caption).foregroundStyle(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: 420, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.black.opacity(0.72)))
+        .allowsHitTesting(false)
     }
 }
 
