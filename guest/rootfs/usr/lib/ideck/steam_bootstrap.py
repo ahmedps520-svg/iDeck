@@ -12,7 +12,13 @@ client updates itself:
  4. restore exec bits (the zips store none), create the ~/.steam links the
     client expects, and record what was installed
 
-The client then updates and verifies the remaining packages itself.
+Each downloaded package file is kept in Steam's own package/ folder under
+the name the client checks: the compressed copy ("zipvz", Valve's VZ/LZMA
+format) when the manifest lists one, else the plain zip. Without them the
+client's first start reports "Package file ... missing or incorrect size"
+for every package and downloads and extracts the whole client again (574 MB
+on the device, 2026-11-12; 668 MB in the runtime 0.1.4 boot test). With
+them, a later client update only fetches the packages that changed.
 
 Only the Python standard library is used. Progress is printed as one JSON
 object per line so the guest agent can forward it to the iPad app.
@@ -25,12 +31,19 @@ import json
 import os
 import shutil
 import stat
+import struct
 import sys
 import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
+
+try:
+    import lzma
+except ImportError:  # Python built without _lzma: fall back to plain zips
+    lzma = None
 
 CDN = "https://client-update.steamstatic.com"
 PLATFORM = "linuxarm64"
@@ -44,7 +57,8 @@ MINIMAL_PACKAGES = ("steam_linuxarm64", "bins_linuxarm64_linuxarm64")
 # The full set is the default. With only the minimal set the client starts,
 # reports "installed version == manifest version, Nothing to do" and never
 # fetches the rest (CEF/libcef.so, SDL3, codecs), so its UI cannot load.
-# Seen in the runtime 0.1.2 boot test. Android (Lepton) is skipped.
+# Seen in the runtime 0.1.2 boot test. Android (Lepton) is not extracted,
+# but its package file is still kept so the client does not download it.
 SKIP_IN_FULL = ("bins_androidarm64_linuxarm64",)
 # ELF e_machine of the native client. The linuxarm64 manifest also ships
 # x86-64 files in steamrt64/ and x86 files in steamrt32/ (the client side of
@@ -175,14 +189,17 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(url: str, dest: Path, size: int, sha256: str, attempts: int = 5, opener=None) -> None:
-    """Downloads with HTTP range resume; verifies size and SHA-256."""
+def download(url: str, dest: Path, size: int, sha256: str, attempts: int = 5, opener=None,
+             part_dir: Path | None = None) -> None:
+    """Downloads with HTTP range resume; verifies size and SHA-256. The
+    partial file lives in part_dir (default: next to dest)."""
     opener = opener or urllib.request.urlopen
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size == size and sha256_file(dest) == sha256:
         emit("download-cached", file=dest.name)
         return
-    part = dest.with_name(dest.name + ".part")
+    part = (part_dir or dest.parent) / (dest.name + ".part")
+    part.parent.mkdir(parents=True, exist_ok=True)
     last_err = None
     for attempt in range(1, attempts + 1):
         have = part.stat().st_size if part.exists() else 0
@@ -217,7 +234,7 @@ def download(url: str, dest: Path, size: int, sha256: str, attempts: int = 5, op
             if got != sha256:
                 part.unlink()
                 raise BootstrapError(f"{dest.name}: SHA-256 mismatch ({got})")
-            os.replace(part, dest)
+            shutil.move(str(part), str(dest))  # part_dir may be another filesystem
             emit("download-done", file=dest.name, size=size)
             return
         except (urllib.error.URLError, OSError, BootstrapError) as e:
@@ -225,6 +242,99 @@ def download(url: str, dest: Path, size: int, sha256: str, attempts: int = 5, op
             emit("download-retry", file=dest.name, attempt=attempt, error=str(e))
             time.sleep(min(30, 2 ** attempt))
     raise BootstrapError(f"download failed: {dest.name}: {last_err}")
+
+
+# ---- Steam package files (package/) ---------------------------------------
+
+def vz_size(name: str) -> int | None:
+    """File size encoded in a VZ package name: "<pkg>.zip.vz.<sha1>_<size>"."""
+    _, sep, tail = name.rpartition("_")
+    return int(tail) if sep and tail.isdigit() else None
+
+
+def package_source(p: dict) -> tuple[str, int, str, bool]:
+    """(name, size, SHA-256, is_vz) of the file to download for a package
+    and keep in package/: the client looks for the VZ copy when the manifest
+    lists one ("zipvz"/"sha2vz"), otherwise for the plain zip ("file")."""
+    vz, sha = p.get("zipvz"), p.get("sha2vz", "")
+    if lzma is not None and vz and len(sha) == 64:
+        size = vz_size(vz)
+        if size is not None:
+            return vz, size, sha, True
+    return p["file"], int(p["size"]), p["sha2"], False
+
+
+def decode_vz(src: Path, dest: Path) -> int:
+    """Decodes Valve's VZ container into the zip it holds; returns its size.
+
+    Layout (checked against Valve's CDN files): "VZa", a 4-byte stamp, the
+    5 LZMA properties, raw LZMA data ending in an end marker, then the
+    CRC-32 and size of the decoded data and "zv". The decoded zip has the
+    same files as the package's plain zip, stored without compression."""
+    if lzma is None:
+        raise BootstrapError("this Python has no lzma module")
+    total = src.stat().st_size
+    with open(src, "rb") as f:
+        head = f.read(12)
+        if len(head) < 12 or head[:3] != b"VZa" or total < 22:
+            raise BootstrapError(f"{src.name}: not a VZ file")
+        f.seek(total - 10)
+        foot = f.read(10)
+        if foot[8:] != b"zv":
+            raise BootstrapError(f"{src.name}: VZ footer missing")
+        want_crc, want_size = struct.unpack("<II", foot[:8])
+        dec = lzma.LZMADecompressor(format=lzma.FORMAT_ALONE)
+        crc, size = 0, 0
+        tmp = dest.with_name(dest.name + ".ideck-tmp")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(tmp, "wb") as out:
+                def sink(data: bytes) -> None:
+                    nonlocal crc, size
+                    crc = zlib.crc32(data, crc)
+                    size += len(data)
+                    out.write(data)
+                # .lzma "alone" header: properties, then an unknown size.
+                sink(dec.decompress(head[7:12] + b"\xff" * 8, max_length=8 << 20))
+                f.seek(12)
+                left = total - 22
+                while left > 0 and not dec.eof:
+                    chunk = f.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    left -= len(chunk)
+                    sink(dec.decompress(chunk, max_length=8 << 20))
+                    while not dec.eof and not dec.needs_input:
+                        sink(dec.decompress(b"", max_length=8 << 20))
+        except lzma.LZMAError as e:
+            tmp.unlink(missing_ok=True)
+            raise BootstrapError(f"{src.name}: {e}") from None
+        if not dec.eof or crc != want_crc or (size & 0xFFFFFFFF) != want_size:
+            tmp.unlink(missing_ok=True)
+            raise BootstrapError(f"{src.name}: decoded data fails the VZ check "
+                                 f"(crc {crc:08x}/{want_crc:08x}, size {size}/{want_size})")
+        os.replace(tmp, dest)
+    return size
+
+
+def fetch_package(p: dict, pkg_dir: Path, cache: Path, opener=None) -> tuple[Path, bool]:
+    """Downloads (or finds) a package's file in package/; returns its path
+    and whether it is a VZ file."""
+    name, size, sha, is_vz = package_source(p)
+    kept = pkg_dir / name
+    download(f"{CDN}/{name}", kept, size, sha, opener=opener, part_dir=cache)
+    return kept, is_vz
+
+
+def prune_package_dir(pkg_dir: Path, keep: set[str]) -> int:
+    """Removes package files of other client versions (names with ".zip.")
+    that are not in keep; leaves the client's other files alone."""
+    removed = 0
+    for f in pkg_dir.iterdir() if pkg_dir.is_dir() else ():
+        if f.is_file() and ".zip." in f.name and f.name not in keep:
+            f.unlink()
+            removed += 1
+    return removed
 
 
 def _is_executable_content(head: bytes, name: str) -> bool:
@@ -367,8 +477,11 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
     text = fetch_manifest(url, opener)
     version, pkgs = client_packages(parse_vdf(text))
     names = select_packages(pkgs, full)
-    total = sum(int(pkgs[n]["size"]) for n in names)
+    # Downloaded and kept in package/ but not extracted (see SKIP_IN_FULL).
+    keep_only = sorted(n for n in pkgs if full and n in SKIP_IN_FULL)
+    total = sum(package_source(pkgs[n])[1] for n in names + keep_only)
     emit("plan", version=version, packages=names, bytes=total)
+    pkg_dir = steam_root / "package"
     previous = {}
     if state_path and state_path.exists():
         try:
@@ -392,17 +505,31 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
         p = pkgs[n]
         prev = done_before.get(n, {})
         if resuming and prev.get("file") == p["file"] and prev.get("sha256") == p["sha2"]:
-            state["packages"][n] = prev
+            # Extracted before; make sure its package file is there too
+            # (bootstraps before runtime 0.1.9 deleted them).
+            kept, _ = fetch_package(p, pkg_dir, cache, opener)
+            state["packages"][n] = {**prev, "kept": kept.name}
             emit("already-installed", package=n)
             continue
         resuming = False
-        z = cache / p["file"]
-        download(f"{CDN}/{p['file']}", z, int(p["size"]), p["sha2"], opener=opener)
-        files = extract(z, steam_root)
-        state["packages"][n] = {"file": p["file"], "sha256": p["sha2"], "files": files}
+        kept, is_vz = fetch_package(p, pkg_dir, cache, opener)
+        z = kept
+        if is_vz:
+            emit("unpacking", package=n, file=kept.name)
+            z = cache / p["file"]
+            decode_vz(kept, z)
+        try:
+            files = extract(z, steam_root)
+        finally:
+            if z != kept:
+                z.unlink(missing_ok=True)
+        state["packages"][n] = {"file": p["file"], "sha256": p["sha2"], "kept": kept.name, "files": files}
         emit("installed", package=n, files=files)
         if state_path:
             write_state(state_path, state)
+    for n in keep_only:
+        kept, _ = fetch_package(pkgs[n], pkg_dir, cache, opener)
+        emit("kept", package=n, file=kept.name)
     configure(steam_root, home, beta)
     if not is_installed(steam_root):  # binary check; state is written below
         raise BootstrapError("ARM64 client binary steamrtarm64/steam missing or not aarch64 after install")
@@ -410,13 +537,11 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
     state["updated"] = int(time.time())
     if state_path:
         write_state(state_path, state)
-    # Cached zips are no longer needed once extracted.
-    for n in names:
-        try:
-            (cache / pkgs[n]["file"]).unlink()
-        except FileNotFoundError:
-            pass
-    emit("done", version=version)
+    # Partial downloads and decoded zips are no longer needed; package files
+    # of other client versions are not either.
+    shutil.rmtree(cache, ignore_errors=True)
+    pruned = prune_package_dir(pkg_dir, {package_source(pkgs[n])[0] for n in names + keep_only})
+    emit("done", version=version, pruned=pruned)
     return state
 
 

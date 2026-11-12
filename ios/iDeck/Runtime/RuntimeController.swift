@@ -140,6 +140,7 @@ final class RuntimeController: ObservableObject {
                       + "extended-virtual-addressing \(IDPlatform.hasExtendedVirtualAddressing); \(Device.summary)")
         DiagLog.write("signature: app groups \((IDPlatform.signedEntitlements?["com.apple.security.application-groups"] as? [String]) ?? []), "
                       + "candidates \(IDPlatform.applicationGroupCandidates), GPU shared memory \(RuntimeController.sharedMemory.summary)")
+        DiagLog.write(SigningProfile.current?.logLine() ?? "signing profile: none embedded")
         if let previous = SessionMarker.takePrevious() {
             DiagLog.write(previous.logLine)
             previousSessionNotice = previous.userMessage
@@ -419,13 +420,8 @@ final class RuntimeController: ObservableObject {
     private func boot(_ files: RuntimeFiles) async throws {
         let s = settings
         phase = .starting("Planning memory")
-        let physMb = IDPlatform.physicalMemory >> 20
-        let limitMb = (IDPlatform.availableMemory + IDPlatform.physFootprint) >> 20
-        let inputs = MemoryInputs(physicalMb: physMb, appLimitMb: limitMb,
-                                  currentFootprintMb: IDPlatform.physFootprint >> 20,
-                                  increasedMemoryLimit: IDPlatform.hasIncreasedMemoryLimit,
-                                  userGuestMb: s.guestMemoryMb, cpus: s.profile.cpus, vulkan: s.vulkan,
-                                  ramFile: s.ramInFile)
+        let inputs = MemoryInputs.measured(s)
+        let limitMb = inputs.appLimitMb
         let plan = try Core.call("memory.plan", inputs, as: MemoryPlan.self)
         self.plan = plan
         warnings = plan.notes

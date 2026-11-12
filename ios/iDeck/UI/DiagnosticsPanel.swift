@@ -38,7 +38,10 @@ struct DiagnosticsPanel: View {
                         : "NOT enabled (open StikDebug › Enable JIT › iDeck)")
                     row("Memory", "\(IDPlatform.availableMemory >> 20) MiB available · footprint \(IDPlatform.physFootprint >> 20) MiB"
                         + (runtime.plan.map { " · guest \($0.guestMb) MiB" } ?? ""))
-                    row("Signing", "\(IDPlatform.signingKind) · app group \(IDPlatform.applicationGroupIdentifier ?? "none")")
+                    row("Signing", "\(IDPlatform.signingKind) · app group \(IDPlatform.applicationGroupIdentifier ?? "none")"
+                        + (SigningProfile.current.map {
+                            " · expires " + DateFormatter.localizedString(from: $0.expires, dateStyle: .short, timeStyle: .short)
+                        } ?? ""))
                 }
                 .font(.caption.monospaced())
                 Toggle("Safe graphics for the next start (no GPU acceleration)", isOn: $model.settings.safeGraphics)

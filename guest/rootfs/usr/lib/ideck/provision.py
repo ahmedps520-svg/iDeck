@@ -90,6 +90,8 @@ def install_steam(p: Progress):
         elif kind == "download-progress" and total:
             done_bytes[ev["file"]] = ev["done"]
             p.update(sid, progress=min(0.95, sum(done_bytes.values()) / total))
+        elif kind == "unpacking":
+            p.update(sid, detail=f"Unpacking {ev.get('package')}")
         elif kind == "installed":
             done_pkgs += 1
         elif kind == "error":

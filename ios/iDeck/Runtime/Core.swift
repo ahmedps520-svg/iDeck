@@ -79,6 +79,18 @@ struct MemoryInputs: Codable {
     var cpus: Int
     var vulkan: Bool
     var ramFile: Bool
+
+    /// This device and app right now: the per-app limit iOS enforces is what
+    /// os_proc_available_memory() reports plus the current footprint. Used by
+    /// setup (before any download) and by every boot, so both see one plan.
+    static func measured(_ s: Settings) -> MemoryInputs {
+        MemoryInputs(physicalMb: IDPlatform.physicalMemory >> 20,
+                     appLimitMb: (IDPlatform.availableMemory + IDPlatform.physFootprint) >> 20,
+                     currentFootprintMb: IDPlatform.physFootprint >> 20,
+                     increasedMemoryLimit: IDPlatform.hasIncreasedMemoryLimit,
+                     userGuestMb: s.guestMemoryMb, cpus: s.profile.cpus, vulkan: s.vulkan,
+                     ramFile: s.ramInFile)
+    }
 }
 
 struct PressureActions: Codable {

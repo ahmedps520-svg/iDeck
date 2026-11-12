@@ -32,7 +32,10 @@ jobs:
       - name: Guest Python tests
         shell: bash
         run: |
-          if [ -f "$RUNNER_TEMP/steam_client_linuxarm64" ]; then export IDECK_STEAM_MANIFEST="$RUNNER_TEMP/steam_client_linuxarm64"; fi
+          if [ -f "$RUNNER_TEMP/steam_client_linuxarm64" ]; then
+            export IDECK_STEAM_MANIFEST="$RUNNER_TEMP/steam_client_linuxarm64"
+            export IDECK_STEAM_FETCH=1  # downloads one small package (VZ and zip) from Valve's CDN
+          fi
           python -m unittest discover -s guest/tests -v
 
   apple-clang:
@@ -67,7 +70,7 @@ jobs:
           if grep -q '^SKIP' build/shm/denied.txt; then echo "::warning::sandbox-exec did not refuse shm_open"; fi
 
   log-parsers:
-    name: Session and Steam update log parsing (macOS)
+    name: Session, Steam update and signing profile parsing (macOS)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +78,7 @@ jobs:
         run: |
           mkdir -p build/parsers
           swiftc -warnings-as-errors -o build/parsers/log_parsers \
-            ios/iDeck/Runtime/LogParsers.swift ios/tests/log_parsers/main.swift
+            ios/iDeck/Runtime/LogParsers.swift ios/iDeck/Runtime/SigningProfile.swift ios/tests/log_parsers/main.swift
       - name: Run
         run: build/parsers/log_parsers
 

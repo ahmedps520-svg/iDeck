@@ -5,6 +5,7 @@ struct HomeView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var runtime: RuntimeController
     @EnvironmentObject var library: LibraryModel
+    @State private var signingNoticeDismissed = false
 
     var body: some View {
         ScrollView {
@@ -13,6 +14,11 @@ struct HomeView: View {
                 if let notice = runtime.previousSessionNotice {
                     NoticeCard(icon: "exclamationmark.triangle.fill", title: "The last session ended unexpectedly",
                                message: notice) { runtime.previousSessionNotice = nil }
+                }
+                if !signingNoticeDismissed, let w = SigningProfile.current?.warning(device: Device.name) {
+                    NoticeCard(icon: "clock.badge.exclamationmark", title: w.title, message: w.message) {
+                        signingNoticeDismissed = true
+                    }
                 }
                 if !library.recent.isEmpty {
                     SectionHeader(title: "Recently Played")

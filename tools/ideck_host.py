@@ -151,6 +151,28 @@ class QMP:
         return self._wait(rid[0])
 
 
+def steam_updater_summary(journal: str) -> dict:
+    """What the Steam client's own updater did after the bootstrap: package
+    files it found missing, downloads it queued, the size of its update and
+    whether it extracted or had nothing to do."""
+    lines = journal.splitlines()
+    total_kb = 0
+    for ln in lines:
+        if "Downloading update (" in ln and " of " in ln:
+            try:
+                total_kb = max(total_kb, int(ln.split(" of ")[1].split(" KB")[0].replace(",", "")))
+            except (IndexError, ValueError):
+                pass
+    return {
+        "missing_package_files": sum("missing or incorrect size" in ln for ln in lines),
+        "pending_downloads": sum("Add pending download" in ln for ln in lines),
+        "update_kb": total_kb,
+        "extracted": any("Extracting package" in ln for ln in lines),
+        "nothing_to_do": any("Nothing to do" in ln or "Download skipped" in ln for ln in lines),
+        "manifest_lines": [ln.split("] ", 1)[-1] for ln in lines if "Downloaded new manifest" in ln][-3:],
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--core", required=True, help="path to libideck_core shared library")
@@ -286,6 +308,9 @@ def main() -> int:
             try:
                 out = agent.request("logs", {"unit": unit, "lines": 1500}, timeout=120)
                 (a.report / f"journal-{unit}.txt").write_text(out.get("output", ""))
+                if unit == "ideck-steam.service":
+                    report["steam_updater"] = steam_updater_summary(out.get("output", ""))
+                    log("steam-updater", report["steam_updater"])
             except Exception as e:  # noqa: BLE001
                 log("journal", f"{unit}: {e}", ok=False)
 

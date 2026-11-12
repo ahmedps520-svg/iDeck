@@ -212,7 +212,24 @@ final class Installer: ObservableObject {
         guard ram >= 6 else {
             throw Core.CallError(message: "\(model) has \(ram) GB of memory; iDeck needs at least 8 GB")
         }
-        update("check-device", detail: "\(model), \(ram) GB memory, \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)")
+        // Device RAM alone is not enough: iOS limits each app to a share of it
+        // (5120 MiB measured on an M5 iPad Pro; 8 GB iPhones and the M3 iPad
+        // Air are not measured yet). Check the real limit with the same plan
+        // a boot uses before downloading the runtime and creating the disks.
+        let plan = try Core.call("memory.plan", MemoryInputs.measured(Settings.load()), as: MemoryPlan.self)
+        DiagLog.write("setup: \(Device.summary), app memory limit \(plan.limitMb) MiB -> Linux \(plan.guestMb) MiB, "
+                      + "fits \(plan.fits), tiers \(plan.allowedTiers.map(String.init).joined(separator: "/"))")
+        guard plan.fits else {
+            throw Core.CallError(message: "\(Device.os) lets iDeck use \(plan.limitMb) MiB of memory on this \(Device.name). "
+                                 + "Linux needs more than that even at its smallest size (\(plan.guestMb) MiB plus iDeck itself), "
+                                 + "so iDeck cannot run on this device.")
+        }
+        var detail = "\(model), \(ram) GB memory, \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+            + " · app limit \(plan.limitMb) MiB, Linux \(plan.guestMb / 1024) GB"
+        if plan.guestMb < 3072 {
+            detail += " (only 2 GB fits: Steam will be slow and may be closed by \(Device.os))"
+        }
+        update("check-device", detail: detail)
     }
 
     private func checkStorage(required: Int64) throws {
@@ -226,6 +243,10 @@ final class Installer: ObservableObject {
     private func checkDistribution() {
         var parts: [String] = []
         parts.append("Signing: \(IDPlatform.signingKind)")
+        if let profile = SigningProfile.current {
+            parts.append("Signature valid until "
+                         + DateFormatter.localizedString(from: profile.expires, dateStyle: .medium, timeStyle: .short))
+        }
         if RuntimeController.edition == "se" {
             parts.append("Edition: interpreter (no JIT, not suitable for games)")
         } else {

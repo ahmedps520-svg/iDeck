@@ -109,5 +109,33 @@ check(SessionLogParsing.sawMemoryPressure(in: trace), "memory warning seen")
 check(!SessionLogParsing.sawMemoryPressure(in: Array(trace.prefix(3))), "no memory warning before it")
 check(SessionLogParsing.lastAppPlacement(in: Array(trace.prefix(1))) == nil, "no app lines -> nil (builds before 26)")
 
+// Signing profile: a CMS envelope around an XML plist, as Sideloadly embeds it.
+func profileData(created: Date, expires: Date) -> Data {
+    let plist: [String: Any] = ["Name": "iOS Team Provisioning Profile: com.ideck.app",
+                                "CreationDate": created, "ExpirationDate": expires,
+                                "Entitlements": ["get-task-allow": true]]
+    let xml = try! PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+    return Data([0x30, 0x82, 0x2a, 0x1b, 0x06, 0x09, 0x2a, 0x86, 0x48]) + xml + Data([0xa0, 0x82, 0x0b, 0x00, 0x30])
+}
+let created = Date(timeIntervalSince1970: 1_794_400_000)
+let weekly = SigningProfile.parse(profileData(created: created, expires: created.addingTimeInterval(7 * 86_400)))
+check(weekly?.name == "iOS Team Provisioning Profile: com.ideck.app", "profile name")
+check(weekly?.expires == created.addingTimeInterval(7 * 86_400), "profile expiry")
+check(weekly?.isShortLived == true, "7-day profile is short-lived")
+let yearly = SigningProfile.parse(profileData(created: created, expires: created.addingTimeInterval(365 * 86_400)))
+check(yearly?.isShortLived == false, "1-year profile is long-lived")
+check(SigningProfile.parse(Data("no plist here".utf8)) == nil, "garbage -> nil")
+if let w = weekly {
+    check(!w.needsWarning(now: w.expires.addingTimeInterval(-3 * 86_400)), "no warning 3 days before")
+    check(w.needsWarning(now: w.expires.addingTimeInterval(-86_400)), "warning 1 day before")
+    check(w.warning(now: w.expires.addingTimeInterval(-(28 * 3600 + 60)))?.title == "iDeck stops opening in 1 day, 4 hours",
+          "warning title: \(w.warning(now: w.expires.addingTimeInterval(-(28 * 3600 + 60)))?.title ?? "nil")")
+    check(w.warning(now: w.expires.addingTimeInterval(60))?.title == "iDeck's signature has expired", "expired title")
+    check(w.logLine(now: w.expires.addingTimeInterval(-3 * 3600 - 60)).hasSuffix("(3 hours left), 7-day (free Apple ID)"),
+          "log line: \(w.logLine(now: w.expires.addingTimeInterval(-3 * 3600 - 60)))")
+}
+check(SigningProfile.remaining(1800) == "less than an hour", "under an hour")
+check(SigningProfile.remaining(-1) == nil, "expired -> nil")
+
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

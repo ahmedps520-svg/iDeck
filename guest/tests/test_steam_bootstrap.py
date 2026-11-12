@@ -5,11 +5,14 @@ Run: python -m unittest discover -s guest/tests
 import hashlib
 import io
 import json
+import lzma
 import os
+import struct
 import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rootfs" / "usr" / "lib" / "ideck"))
@@ -25,6 +28,14 @@ def make_zip(entries: dict) -> bytes:
         for name, data in entries.items():
             z.writestr(name, data)
     return buf.getvalue()
+
+
+def make_vz(data: bytes) -> bytes:
+    """Valve VZ container as served by the CDN: "VZa", stamp, 5 LZMA
+    properties, LZMA data with end marker, CRC-32, size, "zv"."""
+    alone = lzma.compress(data, format=lzma.FORMAT_ALONE)  # props, size (-1), data
+    return (b"VZa" + struct.pack("<I", 0x5FAB0AAD) + alone[:5] + alone[13:]
+            + struct.pack("<II", zlib.crc32(data), len(data)) + b"zv")
 
 
 class FakeResponse:
@@ -143,6 +154,9 @@ class BootstrapPosixTests(unittest.TestCase):
         self.assertEqual(Path(os.readlink(home / ".steam/root")), root)
         self.assertFalse((root / ".steam-enable-steamrt64-client").exists())
         self.assertEqual(json.loads(state.read_text())["version"], "1792618285")
+        # No VZ copies listed: the plain zips stay in package/ for the client.
+        self.assertTrue((root / "package/steam_linuxarm64.zip.aa").is_file())
+        self.assertTrue((root / "package/bins_la.zip.bb").is_file())
         # Re-running is idempotent.
         sb.bootstrap(root, home, self.dir / "cache", beta=True, full=False,
                      manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
@@ -198,12 +212,63 @@ class BootstrapPosixTests(unittest.TestCase):
         st["status"] = "failed"
         del st["packages"]["bins_linuxarm64_linuxarm64"]
         state.write_text(json.dumps(st))
+        (root / "steamrtarm64/steam").unlink()
         cdn.requests.clear()
         sb.bootstrap(root, home, self.dir / "cache", beta=False, full=True,
                      manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
+        # The package files are already in package/: nothing is downloaded
+        # again, and only the unrecorded package is extracted again.
         fetched = [u for u, _ in cdn.requests if "zip" in u]
-        self.assertEqual(fetched, [f"{sb.CDN}/bins_la.zip.bb"])
+        self.assertEqual(fetched, [])
         self.assertTrue(sb.is_installed(root, state))
+
+    def test_full_install_keeps_package_files_for_the_client(self):
+        """Device run 2026-11-12: the client's first start found none of its
+        package/*.zip.vz.* files and downloaded the whole client again."""
+        boot = make_zip({"steam.sh": b"#!/bin/bash\necho hi\n"})
+        bins = make_zip({"steamrtarm64/steam": ELF_AARCH64})
+        strings = make_zip({"public/strings.txt": b"hello"})
+        android = make_zip({"androidarm64/lepton": ELF_AARCH64})
+        boot_vz, bins_vz, android_vz = make_vz(boot), make_vz(bins), make_vz(android)
+
+        def vz(name, data):
+            return {"zipvz": f"{name}.zip.vz.1234_{len(data)}", "sha2vz": hashlib.sha256(data).hexdigest()}
+
+        cdn = FakeCDN()
+        m = manifest_for({
+            "steam_linuxarm64": ("steam_linuxarm64.zip.aa", boot,
+                                 {"IsBootstrapperPackage": "1", **vz("steam_linuxarm64", boot_vz)}),
+            "strings_en_all": ("strings_en_all.zip.dd", strings, {}),  # no VZ copy listed
+            "bins_androidarm64_linuxarm64": ("bins_android.zip.ee", android, vz("bins_android", android_vz)),
+            "bins_linuxarm64_linuxarm64": ("bins_la.zip.bb", bins, vz("bins_la", bins_vz)),
+        })
+        cdn.add("https://manifest.test/m", m.encode())
+        cdn.add(f"{sb.CDN}/steam_linuxarm64.zip.vz.1234_{len(boot_vz)}", boot_vz)
+        cdn.add(f"{sb.CDN}/bins_la.zip.vz.1234_{len(bins_vz)}", bins_vz)
+        cdn.add(f"{sb.CDN}/bins_android.zip.vz.1234_{len(android_vz)}", android_vz)
+        cdn.add(f"{sb.CDN}/strings_en_all.zip.dd", strings)
+        home = self.dir / "home"
+        root = home / ".local/share/Steam"
+        state = home / ".local/share/ideck/steam-bootstrap.json"
+        cache = self.dir / "cache"
+        (root / "package").mkdir(parents=True)
+        (root / "package/bins_la.zip.vz.old_1").write_bytes(b"x")  # other client version
+        (root / "package/steam_client_metrics.bin").write_bytes(b"m")  # the client's own file
+        sb.bootstrap(root, home, cache, beta=False, full=True,
+                     manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
+        self.assertTrue(sb.is_installed(root, state))
+        kept = sorted(f.name for f in (root / "package").iterdir())
+        self.assertEqual(kept, sorted([
+            f"bins_android.zip.vz.1234_{len(android_vz)}", f"bins_la.zip.vz.1234_{len(bins_vz)}",
+            f"steam_linuxarm64.zip.vz.1234_{len(boot_vz)}", "steam_client_metrics.bin", "strings_en_all.zip.dd"]))
+        # VZ packages were not downloaded a second time as plain zips.
+        fetched = [u for u, _ in cdn.requests if "zip" in u]
+        self.assertNotIn(f"{sb.CDN}/bins_la.zip.bb", fetched)
+        self.assertEqual(len(fetched), 4)
+        self.assertEqual(sb.elf_machine(root / "steamrtarm64/steam"), sb.EM_AARCH64)
+        self.assertEqual((root / "public/strings.txt").read_bytes(), b"hello")
+        self.assertFalse((root / "androidarm64").exists())  # kept, not extracted
+        self.assertFalse(cache.exists())
 
     def test_extract_refuses_symlinked_directory(self):
         root = self.dir / "root"
@@ -214,6 +279,42 @@ class BootstrapPosixTests(unittest.TestCase):
         with self.assertRaises(sb.BootstrapError):
             sb.extract(z, root)
         self.assertFalse((root / "real/f").exists())
+
+
+class VzTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_decode_round_trip(self):
+        # 20 MiB of zeros decode from one small input chunk, so the 8 MiB
+        # output limit per call has to be drained in a loop.
+        data = make_zip({"zeros": b"\0" * (20 << 20), "random": os.urandom(300000)})
+        src = self.dir / "p.zip.vz.1_1"
+        src.write_bytes(make_vz(data))
+        self.assertEqual(sb.decode_vz(src, self.dir / "out.zip"), len(data))
+        self.assertEqual((self.dir / "out.zip").read_bytes(), data)
+
+    def test_decode_rejects_bad_crc_magic_and_truncation(self):
+        good = make_vz(b"payload" * 1000)
+        bad_crc = good[:-10] + struct.pack("<I", 0) + good[-6:]
+        for blob in (bad_crc, b"XYa" + good[3:], good[:40] + good[-10:]):
+            src = self.dir / "p.vz"
+            src.write_bytes(blob)
+            with self.assertRaises(sb.BootstrapError):
+                sb.decode_vz(src, self.dir / "out.zip")
+            self.assertFalse((self.dir / "out.zip").exists())
+
+    def test_package_source_and_size(self):
+        p = {"file": "a.zip.1", "size": "10", "sha2": "1" * 64,
+             "zipvz": "a.zip.vz.abc_7", "sha2vz": "2" * 64}
+        self.assertEqual(sb.package_source(p), ("a.zip.vz.abc_7", 7, "2" * 64, True))
+        self.assertEqual(sb.package_source({"file": "a.zip.1", "size": "10", "sha2": "1" * 64}),
+                         ("a.zip.1", 10, "1" * 64, False))
+        self.assertIsNone(sb.vz_size("a.zip.vz.abc"))
 
 
 class ElfTests(unittest.TestCase):
@@ -274,6 +375,30 @@ class RealManifestFormatTests(unittest.TestCase):
         names = sb.select_packages(pkgs, False)
         self.assertEqual(names, ["steam_linuxarm64", "bins_linuxarm64_linuxarm64"])
         self.assertEqual(pkgs["steam_linuxarm64"].get("IsBootstrapperPackage"), "1")
+        # Valve lists a VZ copy (what the client keeps in package/) for the
+        # client binaries.
+        self.assertTrue(sb.package_source(pkgs["bins_linuxarm64_linuxarm64"])[3])
+
+    def test_real_vz_package_matches_plain_zip(self):
+        """Downloads the smallest package that has a VZ copy from Valve's CDN
+        (both forms, each checked against the manifest's SHA-256) and checks
+        the decoded VZ holds exactly the plain zip's files."""
+        path = os.environ.get("IDECK_STEAM_MANIFEST")
+        if not path or os.environ.get("IDECK_STEAM_FETCH") != "1":
+            self.skipTest("set IDECK_STEAM_MANIFEST and IDECK_STEAM_FETCH=1")
+        _, pkgs = sb.client_packages(sb.parse_vdf(Path(path).read_text()))
+        with_vz = [p for p in pkgs.values() if sb.package_source(p)[3]]
+        p = min(with_vz, key=lambda p: sb.package_source(p)[1])
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            kept, is_vz = sb.fetch_package(p, d / "package", d / "cache")
+            self.assertTrue(is_vz)
+            sb.download(f"{sb.CDN}/{p['file']}", d / "plain.zip", int(p["size"]), p["sha2"])
+            sb.decode_vz(kept, d / "decoded.zip")
+            with zipfile.ZipFile(d / "decoded.zip") as a, zipfile.ZipFile(d / "plain.zip") as b:
+                self.assertEqual(sorted(a.namelist()), sorted(b.namelist()))
+                for n in a.namelist():
+                    self.assertEqual(a.read(n), b.read(n), n)
 
 
 if __name__ == "__main__":
