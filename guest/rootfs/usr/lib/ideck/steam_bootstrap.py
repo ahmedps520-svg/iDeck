@@ -326,6 +326,13 @@ def fetch_package(p: dict, pkg_dir: Path, cache: Path, opener=None) -> tuple[Pat
     return kept, is_vz
 
 
+def installed_manifest_name(beta: bool, platform: str = PLATFORM) -> str:
+    """The client's record of what is installed: its manifest's CDN name
+    (steam_client_linuxarm64, steam_client_publicbeta_linuxarm64) plus
+    ".installed", in package/."""
+    return f"steam_client_{'publicbeta_' if beta else ''}{platform}.installed"
+
+
 def prune_package_dir(pkg_dir: Path, keep: set[str]) -> int:
     """Removes package files of other client versions (names with ".zip.")
     that are not in keep; leaves the client's other files alone."""
@@ -455,11 +462,15 @@ def is_installed(steam_root: Path, state_path: Path | None = None) -> bool:
     return st.get("status") == "installed" and st.get("mode") == "full"
 
 
-def write_state(path: Path, state: dict) -> None:
+def write_text_atomic(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
+    tmp.write_text(text)
     os.replace(tmp, path)
+
+
+def write_state(path: Path, state: dict) -> None:
+    write_text_atomic(path, json.dumps(state, indent=2))
 
 
 def fetch_manifest(url: str, opener=None) -> str:
@@ -533,6 +544,14 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
     configure(steam_root, home, beta)
     if not is_installed(steam_root):  # binary check; state is written below
         raise BootstrapError("ARM64 client binary steamrtarm64/steam missing or not aarch64 after install")
+    if full:
+        # The client reads its installed version from a copy of the manifest
+        # it installed, package/<manifest name>.installed (the updater's
+        # strings: "steam_client_", ".installed"; its downloaded manifest is
+        # package/<manifest name>). Without it, runtime 0.1.9's first boot test
+        # logged "installed version 0" and the client queued the whole
+        # client for extraction again although every package file was there.
+        write_text_atomic(pkg_dir / installed_manifest_name(beta), text)
     state["status"] = "installed"
     state["updated"] = int(time.time())
     if state_path:

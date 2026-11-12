@@ -92,7 +92,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 240
         run: |
-          EXTRA=""
+          # Watch 5 more minutes after Steam's window appears: its first update
+          # check (about 2 min after start) shows whether it installs again.
+          EXTRA="--steam-observe 300"
           if [ "${{ inputs.steam_software_ui }}" = "true" ]; then EXTRA="--steam-software-ui --steam-observe 1800"; fi
           # shellcheck disable=SC2086
           python3 tools/ideck_host.py --core build/core/libideck_core.so --runtime out \

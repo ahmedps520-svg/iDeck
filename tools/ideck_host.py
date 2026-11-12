@@ -168,8 +168,11 @@ def steam_updater_summary(journal: str) -> dict:
         "pending_downloads": sum("Add pending download" in ln for ln in lines),
         "update_kb": total_kb,
         "extracted": any("Extracting package" in ln for ln in lines),
+        "installing": any("Installing update" in ln for ln in lines),
+        "uninstalled_manifest": any("uninstalled manifest found" in ln for ln in lines),
         "nothing_to_do": any("Nothing to do" in ln or "Download skipped" in ln for ln in lines),
-        "manifest_lines": [ln.split("] ", 1)[-1] for ln in lines if "Downloaded new manifest" in ln][-3:],
+        "manifest_lines": [ln.split("] ", 1)[-1] for ln in lines
+                           if "Downloaded new manifest" in ln or "Download skipped:" in ln][-3:],
     }
 
 
