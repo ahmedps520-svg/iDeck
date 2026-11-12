@@ -107,7 +107,7 @@ let trace = [
 check(SessionLogParsing.lastAppPlacement(in: trace) == "background", "placement ignores memory-warning and thermal lines")
 check(SessionLogParsing.sawMemoryPressure(in: trace), "memory warning seen")
 check(!SessionLogParsing.sawMemoryPressure(in: Array(trace.prefix(3))), "no memory warning before it")
-check(SessionLogParsing.lastAppPlacement(in: Array(trace.prefix(1))) == nil, "no app lines -> nil (builds before 25)")
+check(SessionLogParsing.lastAppPlacement(in: Array(trace.prefix(1))) == nil, "no app lines -> nil (builds before 26)")
 
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

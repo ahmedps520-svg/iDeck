@@ -311,7 +311,7 @@ The user reported "It crashed" and shared logs from iPad17,2, iPadOS 27.2.
 - The shared `linux-*.log` files came from session A, not from the session in `ideck.log`. The first journal capture was at 60 s, so B never saved its own.
 - `display.png` (session C) shows the Steam updater window with grey, unpainted Steam windows around it.
 
-| Finding | Change (build 25) |
+| Finding | Change (build 26) |
 |---|---|
 | No record of why a session ended | Linux sessions are recorded in `linux-session.json`. At the next launch iDeck logs `previous session: … ended without a crash signal` (or the crash signal), with the last app state. The home screen shows a notice explaining it |
 | No lifecycle, pressure or debugger state in the trace | `app: active / inactive / background / foreground / memory-warning / thermal / terminating` lines; `memory pressure from iOS: …` and pressure actions are logged; the 10 s `mem:` line adds `traced`, thermal state and free disk space |
@@ -320,7 +320,18 @@ The user reported "It crashed" and shared logs from iPad17,2, iPadOS 27.2.
 | The Steam update looked like a hang | iDeck reads Steam's journal and shows "Steam is downloading a client update: X of Y MB" or "…installing…" over the display (every 6 s while it runs) |
 | `StorageManager.decide()` (iOS "important usage" free-space query) ran on the main thread on every 2 s metrics event | Runs off the main thread, at most every 30 s |
 
-Parsing is checked in CI (`log-parsers` job) against the journal lines above. What actually ends sessions on the device is **not yet known**.
+Build 26 checks:
+
+- **Build 25 (`ab23159`) failed to compile.** A string literal in `LogParsers.swift` contained a raw line break, and the new CI job caught the same error.
+- **Build 26 (`2648d19`, run 43155401363)** produced an IPA of 19,073,733 bytes with CFBundleVersion 26, `UIDeviceFamily` [1, 2] and no `UIBackgroundModes`.
+  - The new log strings are present in the binary.
+  - All `@rpath` dependencies resolve (37 frameworks embedded, 34 needed).
+- **CI `log-parsers` (run 43155390530):** 17 of 17 checks passed. These cover download progress with thousands separators, each stage through to "Verification skipped", and crash.log and trace parsing.
+
+Not run on a device yet:
+
+- the new behaviour;
+- what actually ends sessions there (**not yet known**).
 
 ### iOS app builds (`ios.yml`)
 
