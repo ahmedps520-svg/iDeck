@@ -3,6 +3,9 @@ Description=Steam (native ARM64 client) for iDeck
 After=ideck-session.service network-online.target ideck-provision.service
 Wants=network-online.target
 Requires=ideck-session.service
+# CI benchmark boots (tools/ideck_host.py --bench-only) pass ideck.noprovision
+# so nothing else competes with the benchmark for the emulated CPU.
+ConditionKernelCommandLine=!ideck.noprovision
 # A failed install is retried a few times, then left for the app (Restart
 # Steam / Repair Setup): every attempt costs minutes of CPU in the VM.
 StartLimitIntervalSec=900

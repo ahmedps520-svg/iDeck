@@ -78,6 +78,15 @@ model list:
 On iPhone, Steam opens in Small Mode by default, and the display can be
 pinch-zoomed. Only the M5 iPad Pro has been tested on a device so far.
 
+Since build 27, setup measures the per-app limit (`os_proc_available_memory()`
+plus the footprint) and runs the same memory plan a boot uses. If not even the
+2 GB tier fits, setup stops before anything is downloaded. The `setup:` line
+in `ideck.log` records the limit and the planned guest size.
+
+Free Apple ID signatures last 7 days. iDeck reads its embedded provisioning
+profile, logs the expiry (`signing profile:`), shows it in setup and in
+Diagnostics, and warns on Home from 2 days before it expires.
+
 ## Memory limits
 
 Public measurements, none taken on an M5 iPad:

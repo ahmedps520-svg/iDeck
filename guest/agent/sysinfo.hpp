@@ -48,6 +48,10 @@ std::string read_text(const std::string& path, size_t max = 1 << 20);
 ideck::Json parse_os_release(const std::string& text);
 // Feature flags from /proc/cpuinfo "Features" line.
 std::vector<std::string> parse_cpu_features(const std::string& cpuinfo);
+// The first line of a kernel or text log containing `needle`, without the
+// "<level>[timestamp] " prefix; "" if none.
+std::string find_log_line(const std::string& log, const std::string& needle);
+std::string trimmed(std::string s);
 
 ideck::Json static_info();
 ideck::Json dynamic_status(const std::vector<CpuTimes>& prev, std::vector<CpuTimes>& now);

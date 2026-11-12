@@ -40,9 +40,16 @@ bool valid_cpu_model(const std::string& m) {
 std::string default_kernel_cmdline() {
     // root is the system disk (whole-disk ext4, no partition table).
     // ideck.* parameters are read by the guest provisioning service.
+    // The TCG settings match what the app passes on the device
+    // (RuntimeController.kernelCmdline), so CI measures the same kernel:
+    // mitigations=off and nowatchdog, plus kpti=0. On neoverse-n1/-v1 (no
+    // E0PD) KASLR forces kernel page-table isolation on before
+    // mitigations=off is consulted (Linux 6.12 unmap_kernel_at_el0), and
+    // every user/kernel switch then changes the ASID, which QEMU handles
+    // with a full soft-TLB flush.
     return "root=/dev/vda rootfstype=ext4 rw console=ttyAMA0 loglevel=4 "
            "systemd.show_status=auto rd.udev.log_level=3 quiet "
-           "transparent_hugepage=never ideck.mode=gaming";
+           "transparent_hugepage=never mitigations=off nowatchdog kpti=0 ideck.mode=gaming";
 }
 
 QemuArgsResult build_qemu_args(const VmConfig& c) {
@@ -99,6 +106,12 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
         // Pointer authentication and SVE/SME are costly to emulate and not
         // needed by the guest userspace; FEX uses NEON paths without SVE.
         cpu += ",pauth=off,sve=off,sme=off";
+    } else if (cpu == "neoverse-v1" || cpu == "neoverse-n2" || cpu == "cortex-a710") {
+        // These models advertise PAuth with the architected QARMA algorithm,
+        // which QEMU documents as slow to emulate; Debian code signs every
+        // function return with it. They have pauth/sve properties in QEMU's
+        // cpu64.c (neoverse-n1 and cortex-a76 have neither).
+        cpu += ",pauth=off,sve=off";
     }
     add({"-cpu", cpu});
     add({"-smp", "cpus=" + std::to_string(c.cpus) + ",sockets=1,cores=" + std::to_string(c.cpus) +

@@ -7,6 +7,7 @@
 
 #if defined(__linux__)
 #include <dirent.h>
+#include <sys/klog.h>
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <unistd.h>
@@ -15,6 +16,30 @@
 namespace agent {
 
 using ideck::Json;
+
+std::string find_log_line(const std::string& log, const std::string& needle) {
+    size_t at = log.find(needle);
+    if (at == std::string::npos) return {};
+    size_t begin = log.rfind('\n', at);
+    begin = begin == std::string::npos ? 0 : begin + 1;
+    size_t end = log.find('\n', at);
+    std::string line = log.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+    // Drop the "<6>[    0.000000] " prefix of kernel ring-buffer records.
+    if (!line.empty() && line[0] == '<') {
+        size_t gt = line.find('>');
+        if (gt != std::string::npos) line.erase(0, gt + 1);
+    }
+    if (!line.empty() && line[0] == '[') {
+        size_t rb = line.find("] ");
+        if (rb != std::string::npos) line.erase(0, rb + 2);
+    }
+    return line;
+}
+
+std::string trimmed(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == ' ' || s.back() == '\0')) s.pop_back();
+    return s;
+}
 
 std::string read_text(const std::string& path, size_t max) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
@@ -163,6 +188,20 @@ Json static_info() {
     }
     j.set("page_size", static_cast<long long>(sysconf(_SC_PAGESIZE)));
     j.set("cpus", static_cast<long long>(sysconf(_SC_NPROCESSORS_ONLN)));
+    j.set("cmdline", trimmed(read_text("/proc/cmdline", 4096)));
+    // Whether the kernel unmaps itself from user space (KPTI). Under TCG each
+    // switch costs a full soft-TLB flush, and on neoverse-n1 KASLR forces it
+    // on even with mitigations=off; the meltdown sysfs file does not show
+    // this ("Not affected"), the boot message does.
+    int size = klogctl(10 /* SYSLOG_ACTION_SIZE_BUFFER */, nullptr, 0);
+    if (size > 0) {
+        std::string buf(static_cast<size_t>(size), '\0');
+        int n = klogctl(3 /* SYSLOG_ACTION_READ_ALL */, &buf[0], size);
+        if (n > 0) {
+            buf.resize(static_cast<size_t>(n));
+            j.set("kpti", find_log_line(buf, "kernel page table isolation"));
+        }
+    }
 #endif
     j.set("os", parse_os_release(read_text("/etc/os-release")));
     MemInfo m = read_meminfo();

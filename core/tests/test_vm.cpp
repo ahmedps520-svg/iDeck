@@ -118,6 +118,13 @@ TEST("qemu: file-backed RAM and comma escaping") {
     CHECK(has_pair(r.argv, "-machine", "memory-backend=ram0"));
     CHECK(has_pair(r.argv, "-object", "mem-path=/data/ram,,1.bin"));
     CHECK(has_pair(r.argv, "-cpu", "max,pauth=off,sve=off,sme=off"));
+    c.cpu_model = "neoverse-v1";
+    CHECK(has_pair(build_qemu_args(c).argv, "-cpu", "neoverse-v1,pauth=off,sve=off"));
+    c.cpu_model = "neoverse-n1";
+    CHECK(has_pair(build_qemu_args(c).argv, "-cpu", "neoverse-n1"));
+    std::string cmdline = default_kernel_cmdline();
+    CHECK(cmdline.find(" kpti=0") != std::string::npos);
+    CHECK(cmdline.find(" mitigations=off") != std::string::npos);
     // No balloon with file-backed RAM (Darwin cannot punch holes in it).
     CHECK(!has_pair(r.argv, "-device", "virtio-balloon-pci"));
     CHECK(has_pair(build_qemu_args(ios_config()).argv, "-device", "virtio-balloon-pci"));

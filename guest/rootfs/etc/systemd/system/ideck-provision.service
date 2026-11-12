@@ -3,6 +3,9 @@ Description=iDeck first-boot provisioning (Steam, compatibility tools, self-test
 After=network-online.target ideck-home.service ideck-agent.service
 Wants=network-online.target
 Requires=ideck-home.service
+# CI benchmark boots (tools/ideck_host.py --bench-only) pass ideck.noprovision
+# so nothing else competes with the benchmark for the emulated CPU.
+ConditionKernelCommandLine=!ideck.noprovision
 
 [Service]
 Type=oneshot

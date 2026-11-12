@@ -60,6 +60,32 @@ jobs:
             --bench build/core/ideck-bench-aarch64-linux-musl --out out
           sudo chown -R "$USER" out
           ls -la out
+      - name: Kernel and CPU model benchmark (A/B boots without provisioning)
+        if: github.event_name == 'push' || inputs.boot_test
+        continue-on-error: true
+        timeout-minutes: 45
+        run: |
+          variant() {
+            python3 tools/ideck_host.py --core build/core/libideck_core.so --runtime out \
+              --report "out/boot-test/bench-$1" --memory 4096 --cpus 4 --bench-only "${@:2}" \
+              > "out/bench-$1.log" 2>&1 || echo "::warning::benchmark variant $1 failed"
+          }
+          mkdir -p out/boot-test
+          # Same kernel command line as the device except for the one change.
+          variant n1-kpti-default --cpu-model neoverse-n1 --cmdline-remove kpti=0
+          variant n1-kpti0 --cpu-model neoverse-n1
+          variant v1-pauth-off --cpu-model neoverse-v1
+          python3 - <<'PY'
+          import json, pathlib
+          for d in sorted(pathlib.Path("out/boot-test").glob("bench-*")):
+              try:
+                  r = json.loads((d / "report.json").read_text())
+              except (OSError, ValueError) as e:
+                  print(d.name, "no report:", e)
+                  continue
+              print(f"{d.name}: boot {r.get('boot_seconds')} s; kpti: {r.get('kpti')!r}")
+              print("   ", json.dumps(r.get("bench")))
+          PY
       - name: Boot test (QEMU TCG, provisioning, Steam, benchmark)
         id: boot
         if: github.event_name == 'push' || inputs.boot_test

@@ -76,7 +76,7 @@ struct SettingsView: View {
                 DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
                     Picker("CPU model", selection: $model.settings.cpuModel) {
                         Text("Neoverse N1 (ARMv8.2, default)").tag("neoverse-n1")
-                        Text("Neoverse V1 (ARMv8.4 + SVE)").tag("neoverse-v1")
+                        Text("Neoverse V1 (ARMv8.4, no SVE or PAuth)").tag("neoverse-v1")
                         Text("max (all emulated features)").tag("max")
                     }
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)

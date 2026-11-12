@@ -83,7 +83,8 @@ def main() -> int:
         "channel": a.channel,
         "min_app_build": a.min_app_build,
         "kernel_cmdline": "root=/dev/vda rootfstype=ext4 rw console=ttyAMA0 loglevel=4 quiet "
-                          "systemd.show_status=auto transparent_hugepage=never ideck.mode=gaming",
+                          "systemd.show_status=auto transparent_hugepage=never mitigations=off nowatchdog kpti=0 "
+                          "ideck.mode=gaming",
         "guest": guest,
         "defaults": {"cpu_model": "neoverse-n1", "cpus": 4},
         "artifacts": arts,

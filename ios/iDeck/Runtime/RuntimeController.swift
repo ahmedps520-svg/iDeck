@@ -411,8 +411,11 @@ final class RuntimeController: ObservableObject {
         // mitigations=off: the VM runs only this user's Linux, and under TCG
         // every mitigation (branch-history flushes on each syscall and
         // exception) is emulated code. nowatchdog: no lockup-detector timer
-        // wakeups on idle vCPUs.
-        let extra = ["systemd.show_status=true", "mitigations=off", "nowatchdog"]
+        // wakeups on idle vCPUs. kpti=0: with KASLR on a CPU model without
+        // E0PD (neoverse-n1/-v1) Linux forces page-table isolation on before
+        // it looks at mitigations=off, and each user/kernel switch then
+        // flushes QEMU's whole soft TLB (see default_kernel_cmdline).
+        let extra = ["systemd.show_status=true", "mitigations=off", "nowatchdog", "kpti=0"]
             .filter { e in !parts.contains { $0.split(separator: "=").first == e.split(separator: "=").first } }
         return (parts + extra).joined(separator: " ")
     }
@@ -592,7 +595,8 @@ final class RuntimeController: ObservableObject {
     private func agentEvent(_ event: String, _ data: [String: Any]) {
         switch event {
         case "ready":
-            DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")")
+            DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")"
+                          + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running

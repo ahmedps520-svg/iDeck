@@ -29,6 +29,19 @@ TEST("agent: os-release and cpu features") {
     CHECK_EQ(f[8], std::string("atomics"));
 }
 
+TEST("agent: kernel log line lookup") {
+    std::string klog =
+        "<6>[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x414fd0c1]\n"
+        "<6>[    0.000000] CPU features: kernel page table isolation forced ON by KASLR\n"
+        "<6>[    0.012000] smp: Bringing up secondary CPUs ...\n";
+    CHECK_EQ(find_log_line(klog, "kernel page table isolation"),
+             std::string("CPU features: kernel page table isolation forced ON by KASLR"));
+    CHECK_EQ(find_log_line("[    0.1] last line without newline", "last line"),
+             std::string("last line without newline"));
+    CHECK(find_log_line(klog, "not there").empty());
+    CHECK_EQ(trimmed("root=/dev/vda kpti=0\n"), std::string("root=/dev/vda kpti=0"));
+}
+
 TEST("agent: cpu usage between samples") {
     std::vector<CpuTimes> a = {{100, 1000}, {50, 500}};
     std::vector<CpuTimes> b = {{150, 1100}, {50, 600}};

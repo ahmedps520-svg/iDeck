@@ -191,7 +191,15 @@ def main() -> int:
     ap.add_argument("--steam-observe", type=int, default=0,
                     help="keep taking screenshots this many seconds after the first Steam window")
     ap.add_argument("--skip-bench", action="store_true")
+    ap.add_argument("--bench-only", action="store_true",
+                    help="boot with ideck.noprovision (no Steam, no provisioning), run the benchmark, power off")
+    ap.add_argument("--cmdline-remove", action="append", default=[],
+                    help="drop this word from the kernel command line (repeatable)")
+    ap.add_argument("--cmdline-add", action="append", default=[],
+                    help="append this word to the kernel command line (repeatable)")
     a = ap.parse_args()
+    if a.bench_only:
+        a.cmdline_add.append("ideck.noprovision")
 
     a.report.mkdir(parents=True, exist_ok=True)
     u = os.uname()  # a struct sequence: no _asdict()
@@ -221,6 +229,11 @@ def main() -> int:
     }
     argv = core.call("qemu.args", cfg)["argv"]
     argv[0] = a.qemu
+    if a.cmdline_remove or a.cmdline_add:
+        i = argv.index("-append") + 1
+        words = [w for w in argv[i].split() if w not in a.cmdline_remove]
+        argv[i] = " ".join(words + [w for w in a.cmdline_add if w not in words])
+    report["kernel_cmdline"] = argv[argv.index("-append") + 1]
     (a.report / "qemu-argv.json").write_text(json.dumps(argv, indent=2))
     log("qemu-start", {"argv": " ".join(argv)})
     qemu = subprocess.Popen(argv, stdout=open(a.report / "qemu.log", "w"), stderr=subprocess.STDOUT)
@@ -235,7 +248,18 @@ def main() -> int:
             return 1
         report["boot_seconds"] = round(time.time() - t0, 1)
         log("agent-ready", ready)
+        report["kpti"] = (ready or {}).get("kpti", "")
         log("status", agent.request("status"))
+
+        if a.bench_only:
+            bench = agent.request("bench.run", {"quick": False}, timeout=3600)
+            (a.report / "bench.json").write_text(json.dumps(bench, indent=2))
+            report["bench"] = {r["name"]: r.get("value") for r in bench.get("results", []) if r.get("ok")}
+            log("benchmark", report["bench"])
+            agent.request("power.off")
+            qemu.wait(timeout=180)
+            log("shutdown", {"qemu_exit": qemu.returncode})
+            return 0
 
         # Controller path: connect a virtual pad and confirm the kernel sees it.
         inp = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
