@@ -194,6 +194,8 @@ def main() -> int:
     ap.add_argument("--steam-observe", type=int, default=0,
                     help="keep taking screenshots this many seconds after the first Steam window")
     ap.add_argument("--skip-bench", action="store_true")
+    ap.add_argument("--steam-apply-update", action="store_true",
+                    help="if the client queued an install, restart Steam, wait for it and snapshot package/ again")
     ap.add_argument("--bench-only", action="store_true",
                     help="boot with ideck.noprovision (no Steam, no provisioning), run the benchmark, power off")
     ap.add_argument("--cmdline-remove", action="append", default=[],
@@ -340,6 +342,42 @@ def main() -> int:
                     log("steam-updater", report["steam_updater"])
             except Exception as e:  # noqa: BLE001
                 log("journal", f"{unit}: {e}", ok=False)
+
+        # The client's updater state as the bootstrap left it, and (if the
+        # client queued an install) as the client itself leaves it after a
+        # restart applies it: shows which files record the installed version.
+        def package_snapshot(name: str) -> dict:
+            try:
+                snap = agent.request("steam.package", timeout=60)
+                (a.report / f"steam-package-{name}.json").write_text(json.dumps(snap, indent=2))
+                small = {e["name"]: e["size"] for e in snap.get("entries", []) if ".zip." not in e["name"]}
+                log(f"steam-package-{name}", small)
+                return snap
+            except Exception as e:  # noqa: BLE001
+                log(f"steam-package-{name}", str(e), ok=False)
+                return {}
+
+        package_snapshot("before")
+        if a.steam_apply_update and report.get("steam_updater", {}).get("uninstalled_manifest"):
+            def steam_journal() -> str:
+                return agent.request("logs", {"unit": "ideck-steam.service", "lines": 3000}, timeout=120).get("output", "")
+
+            completes_before = steam_journal().count("Update complete")
+            agent.request("steam.restart", timeout=60)
+            done_at, out = None, ""
+            end = time.time() + 25 * 60
+            while time.time() < end:
+                agent.wait_event("__none__", 60)
+                out = steam_journal()
+                if out.count("Update complete") > completes_before or "Download skipped" in out:
+                    done_at = round(time.time() - t0, 1)
+                    break
+            agent.wait_event("__none__", 90)  # let the restarted client write its state
+            out = steam_journal()
+            (a.report / "journal-ideck-steam.service-after-restart.txt").write_text(out)
+            report["steam_update_applied_at"] = done_at
+            log("steam-apply-update", {"done_at": done_at, "updater": steam_updater_summary(out)}, ok=done_at is not None)
+            package_snapshot("after-update")
 
         try:
             log("selftest", agent.request("selftest.run", timeout=900))

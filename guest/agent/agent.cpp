@@ -26,6 +26,7 @@
 #include "sysinfo.hpp"
 
 #if defined(__linux__)
+#include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
@@ -187,6 +188,36 @@ Reply execute_slow(const Job& job) {
         r.set("pids", std::move(pids));
         r.set("bootstrap", read_json_file("/home/deck/.local/share/ideck/steam-bootstrap.json"));
         rep.result = std::move(r);
+        return rep;
+    }
+    if (job.op == "steam.package") {
+        // Read-only view of the client updater's state in Steam/package/:
+        // every entry with its size, plus the text of small files that are
+        // not package archives (manifests and install records).
+        const std::string dir = "/home/deck/.local/share/Steam/package";
+        Json entries = Json::array();
+        Json texts = Json::object();
+        if (DIR* d = opendir(dir.c_str())) {
+            while (dirent* e = readdir(d)) {
+                std::string name = e->d_name;
+                if (name == "." || name == "..") continue;
+                std::string path = dir + "/" + name;
+                struct stat st {};
+                if (lstat(path.c_str(), &st) != 0) continue;
+                Json item = Json::object();
+                item.set("name", name);
+                item.set("size", static_cast<long long>(st.st_size));
+                item.set("dir", S_ISDIR(st.st_mode) != 0);
+                entries.push(std::move(item));
+                if (S_ISREG(st.st_mode) && st.st_size <= (256 << 10) && name.find(".zip.") == std::string::npos &&
+                    name.find(".bin") == std::string::npos) {
+                    texts.set(name, agent::read_text(path, 256 << 10));
+                }
+            }
+            closedir(d);
+        }
+        rep.result.set("entries", std::move(entries));
+        rep.result.set("texts", std::move(texts));
         return rep;
     }
     if (job.op == "steam.configure") {
