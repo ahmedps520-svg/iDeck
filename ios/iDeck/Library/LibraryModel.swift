@@ -112,6 +112,9 @@ final class LibraryModel: ObservableObject {
     }
 
     func play(_ game: Game) async throws {
+        // Steam's library window is minimised while the game runs, so its UI
+        // does not draw behind the game (steam-ui-daemon).
+        await runtime.noteGameLaunch()
         try await runtime.openSteam("steam://rungameid/\(game.appid)")
     }
 

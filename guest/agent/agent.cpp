@@ -187,6 +187,8 @@ Reply execute_slow(const Job& job) {
         for (int p : agent::find_processes("steamrtarm64/steam")) pids.push(p);
         r.set("pids", std::move(pids));
         r.set("bootstrap", read_json_file("/home/deck/.local/share/ideck/steam-bootstrap.json"));
+        // steam-ui-daemon: requested state, game running, webhelper nice.
+        r.set("ui", read_json_file("/run/ideck/steam-ui.json"));
         rep.result = std::move(r);
         return rep;
     }
@@ -209,9 +211,11 @@ Reply execute_slow(const Job& job) {
                 item.set("size", static_cast<long long>(st.st_size));
                 item.set("dir", S_ISDIR(st.st_mode) != 0);
                 entries.push(std::move(item));
-                if (S_ISREG(st.st_mode) && st.st_size <= (256 << 10) && name.find(".zip.") == std::string::npos &&
+                if (S_ISREG(st.st_mode) && name.find(".zip.") == std::string::npos &&
                     name.find(".bin") == std::string::npos) {
-                    texts.set(name, agent::read_text(path, 256 << 10));
+                    // Large records (the client's 1.5 MB .installed) only
+                    // as their first 4 KiB.
+                    texts.set(name, agent::read_text(path, st.st_size <= (256 << 10) ? (256 << 10) : 4096));
                 }
             }
             closedir(d);
@@ -240,6 +244,38 @@ Reply execute_slow(const Job& job) {
             std::fclose(f);
             if (std::rename(tmp.c_str(), path.c_str()) != 0) return fail("cannot replace " + path);
         }
+        return rep;
+    }
+    if (job.op == "steam.ui") {
+        // What the iPad shows, for steam-ui-daemon: "visible" (Steam on the
+        // Linux screen), "game" (a game is launching or running) or "away"
+        // (iDeck's own screens). The daemon minimises Steam's windows and
+        // lowers steamwebhelper's priority accordingly.
+        // Without "state" it only reports the daemon's status (cheap: the
+        // app polls it while a game runs).
+        std::string state = a["state"].string_or("");
+        if (!state.empty()) {
+            if (state != "visible" && state != "game" && state != "away") {
+                return fail("state must be visible, game or away");
+            }
+            mkdir("/run/ideck", 0755);
+            const std::string path = "/run/ideck/steam-ui", tmp = path + ".tmp";
+            std::FILE* f = std::fopen(tmp.c_str(), "wb");
+            if (!f) return fail("cannot write " + path);
+            std::string line = state + "\n";
+            std::fwrite(line.data(), 1, line.size(), f);
+            std::fclose(f);
+            if (std::rename(tmp.c_str(), path.c_str()) != 0) return fail("cannot replace " + path);
+            rep.result.set("requested", state);
+            // The daemon applies a new state within a second and then writes
+            // its status; wait for that (up to 3 s) so the caller can rely on
+            // the windows being minimised before it launches a game.
+            for (int i = 0; i < 30; ++i) {
+                if (read_json_file("/run/ideck/steam-ui.json")["state"].string_or("") == state) break;
+                usleep(100 * 1000);
+            }
+        }
+        rep.result.set("daemon", read_json_file("/run/ideck/steam-ui.json"));
         return rep;
     }
     if (job.op == "steam.open") {

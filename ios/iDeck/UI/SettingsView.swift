@@ -46,6 +46,14 @@ struct SettingsView: View {
                     .onChange(of: model.settings.steamLightweight) { _ in applySteam() }
                 Toggle("Compact library (Steam Small Mode)", isOn: $model.settings.steamSmallMode)
                     .onChange(of: model.settings.steamSmallMode) { _ in applySteam() }
+                Toggle("Pause Steam's window when it is not on screen", isOn: $model.settings.steamInBackground)
+                    // Settings is not the game view, so the wanted state is "away"
+                    // (or "visible" once the switch is off).
+                    .onChange(of: model.settings.steamInBackground) { _ in
+                        runtime.setSteamScreen(.away, reason: "setting changed")
+                    }
+                Text("Steam's window stops drawing while you are in iDeck's screens or playing, and gets the lowest priority during games. Show it again from ⋯ › Show Steam.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
                 DisclosureGroup("Make Steam lighter (settings inside Steam)") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("These are Steam's own settings; set them once in Steam and they are kept:")

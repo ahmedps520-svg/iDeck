@@ -39,6 +39,8 @@ x11-xserver-utils
 x11-utils
 xauth
 openbox
+# Minimises Steam's windows while the iPad does not show them (steam-ui-daemon).
+xdotool
 mesa-utils
 mesa-vulkan-drivers
 libgl1-mesa-dri

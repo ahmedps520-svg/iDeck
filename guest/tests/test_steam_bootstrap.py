@@ -158,8 +158,8 @@ class BootstrapPosixTests(unittest.TestCase):
         self.assertTrue((root / "package/steam_linuxarm64.zip.aa").is_file())
         self.assertTrue((root / "package/bins_la.zip.bb").is_file())
         # A minimal install is not complete, so it is not recorded as installed.
-        self.assertFalse((root / "package/steam_client_linuxarm64.installed").exists())
-        self.assertEqual(sb.installed_manifest_name(True), "steam_client_publicbeta_linuxarm64.installed")
+        self.assertFalse((root / "package/steam_client_linuxarm64.manifest").exists())
+        self.assertEqual(sb.installed_manifest_name(True), "steam_client_publicbeta_linuxarm64.manifest")
         # Re-running is idempotent.
         sb.bootstrap(root, home, self.dir / "cache", beta=True, full=False,
                      manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
@@ -257,6 +257,8 @@ class BootstrapPosixTests(unittest.TestCase):
         (root / "package").mkdir(parents=True)
         (root / "package/bins_la.zip.vz.old_1").write_bytes(b"x")  # other client version
         (root / "package/steam_client_metrics.bin").write_bytes(b"m")  # the client's own file
+        # 0.1.9 test builds put the manifest into .installed (the client's file list).
+        (root / "package/steam_client_linuxarm64.installed").write_text(m)
         sb.bootstrap(root, home, cache, beta=False, full=True,
                      manifest_url="https://manifest.test/m", opener=cdn, state_path=state)
         self.assertTrue(sb.is_installed(root, state))
@@ -264,9 +266,9 @@ class BootstrapPosixTests(unittest.TestCase):
         self.assertEqual(kept, sorted([
             f"bins_android.zip.vz.1234_{len(android_vz)}", f"bins_la.zip.vz.1234_{len(bins_vz)}",
             f"steam_linuxarm64.zip.vz.1234_{len(boot_vz)}", "steam_client_metrics.bin", "strings_en_all.zip.dd",
-            "steam_client_linuxarm64.installed"]))
+            "steam_client_linuxarm64.manifest"]))
         # The client's record of the installed version is the manifest itself.
-        self.assertEqual((root / "package/steam_client_linuxarm64.installed").read_text(), m)
+        self.assertEqual((root / "package/steam_client_linuxarm64.manifest").read_text(), m)
         # VZ packages were not downloaded a second time as plain zips.
         fetched = [u for u, _ in cdn.requests if "zip" in u]
         self.assertNotIn(f"{sb.CDN}/bins_la.zip.bb", fetched)

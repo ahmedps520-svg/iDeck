@@ -731,6 +731,8 @@ final class RuntimeController: ObservableObject {
         guard let agent else { return }
         _ = try? await agent.request("time.sync", ["unix_ms": Int64(Date().timeIntervalSince1970 * 1000)])
         await applySteamSettings()
+        steamScreenSent = nil
+        await sendSteamScreen(reason: "Linux ready")
         if let st = try? await agent.requestDict("steam.status"), (st["service"] as? String) != "active" {
             _ = try? await agent.request("steam.start", timeout: 60)
         }
@@ -834,6 +836,94 @@ final class RuntimeController: ObservableObject {
     func openSteam(_ url: String) async throws {
         guard let agent else { throw Core.CallError(message: "Linux is not running") }
         _ = try await agent.request("steam.open", ["url": url])
+    }
+
+    // MARK: Steam's UI only while it is on screen (steam-ui-daemon)
+
+    /// What the iPad shows, sent to Linux: "visible" (the Linux screen with
+    /// Steam), "game" (a game is launching or running) or "away" (iDeck's own
+    /// screens). Linux minimises Steam's windows unless "visible", so its UI
+    /// (Chromium under emulation) stops drawing, and lowers steamwebhelper's
+    /// priority while a game runs.
+    enum SteamScreen: String { case visible, game, away }
+    @Published private(set) var steamScreen: SteamScreen = .away
+    private var steamScreenSent: SteamScreen?
+    private var gameLaunchPending = false
+    private var gameWatch: Task<Void, Never>?
+
+    @discardableResult
+    func setSteamScreen(_ wanted: SteamScreen, reason: String) -> Task<Void, Never> {
+        let s: SteamScreen = settings.steamInBackground ? wanted : .visible
+        steamScreen = s
+        gameWatch?.cancel()
+        gameWatch = nil
+        if s == .game { watchGame() }
+        return Task { await sendSteamScreen(reason: reason) }
+    }
+
+    /// Before Play sends steam://rungameid (the game view opens after it).
+    /// Waits until Linux has the state, so Steam's windows are minimised
+    /// before the launch and dialogs the launch opens stay on screen.
+    func noteGameLaunch() async {
+        gameLaunchPending = true
+        await setSteamScreen(.game, reason: "game launch").value
+    }
+
+    func gameViewAppeared() {
+        if gameLaunchPending {
+            gameLaunchPending = false
+            if steamScreen != .game { setSteamScreen(.game, reason: "game view") }
+        } else {
+            setSteamScreen(.visible, reason: "game view")
+        }
+    }
+
+    func gameViewDisappeared() {
+        gameLaunchPending = false
+        setSteamScreen(.away, reason: "iDeck screens")
+    }
+
+    private func sendSteamScreen(reason: String) async {
+        guard let agent, isRunning else { return }
+        let s = steamScreen
+        guard s != steamScreenSent else { return }
+        do {
+            _ = try await agent.request("steam.ui", ["state": s.rawValue], timeout: 10)
+            steamScreenSent = s
+            DiagLog.write("steam ui: \(s.rawValue) (\(reason))")
+        } catch {
+            // Runtimes before 0.1.9 have no steam-ui-daemon; nothing to do.
+            DiagLog.write("steam ui: \(s.rawValue) not applied (\(error.localizedDescription))")
+            steamScreenSent = s
+        }
+    }
+
+    /// While a game is expected: when it has run and quits, or when no game
+    /// started within 90 s (Steam may be showing why), show Steam again.
+    private func watchGame() {
+        gameWatch = Task { [weak self] in
+            let started = Date()
+            var seenRunning = false
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, !Task.isCancelled, self.steamScreen == .game, let agent = self.agent else { return }
+                // steam.ui without a state only reads the daemon's status file.
+                let st = (try? await agent.requestDict("steam.ui", [:], timeout: 10)) ?? [:]
+                let running = ((st["daemon"] as? [String: Any])?["game_running"] as? Bool) ?? false
+                if running && !seenRunning {
+                    seenRunning = true
+                    DiagLog.write("steam ui: game process running")
+                }
+                if seenRunning && !running {
+                    self.setSteamScreen(.visible, reason: "game exited")
+                    return
+                }
+                if !seenRunning && Date().timeIntervalSince(started) > 90 {
+                    self.setSteamScreen(.visible, reason: "no game process after 90 s")
+                    return
+                }
+            }
+        }
     }
 
     func restartSteam() async {

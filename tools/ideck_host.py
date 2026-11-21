@@ -195,7 +195,7 @@ def main() -> int:
                     help="keep taking screenshots this many seconds after the first Steam window")
     ap.add_argument("--skip-bench", action="store_true")
     ap.add_argument("--steam-apply-update", action="store_true",
-                    help="if the client queued an install, restart Steam, wait for it and snapshot package/ again")
+                    help="restart Steam once, wait for its update check and report whether it installed again")
     ap.add_argument("--bench-only", action="store_true",
                     help="boot with ideck.noprovision (no Steam, no provisioning), run the benchmark, power off")
     ap.add_argument("--cmdline-remove", action="append", default=[],
@@ -358,26 +358,76 @@ def main() -> int:
                 return {}
 
         package_snapshot("before")
-        if a.steam_apply_update and report.get("steam_updater", {}).get("uninstalled_manifest"):
+
+        # Steam's UI while the iPad shows iDeck's screens: steam-ui-daemon
+        # minimises its windows ("away"). Guest CPU over 60 s with the window
+        # shown, hidden, and shown again, plus a screenshot of each.
+        def cpu_average(seconds: int):
+            agent.request("status")  # starts a new sampling interval
+            vals = []
+            for _ in range(max(1, seconds // 5)):
+                agent.wait_event("__none__", 5)
+                v = agent.request("status").get("cpu_percent")
+                if isinstance(v, (int, float)):
+                    vals.append(v)
+            return round(sum(vals) / len(vals), 1) if vals else None
+
+        def screenshot(name: str) -> int:
+            p = a.report / f"{name}.png"
+            try:
+                qmp.run("screendump", {"filename": str(p), "format": "png"})
+                time.sleep(1)
+                return p.stat().st_size
+            except Exception:  # noqa: BLE001
+                return 0
+
+        if window_seen_at is not None:
+            ui: dict = {}
+            try:
+                ui["visible_cpu"] = cpu_average(60)
+                ui["away_reply"] = agent.request("steam.ui", {"state": "away"}, timeout=30)
+                agent.wait_event("__none__", 10)
+                ui["away_png_bytes"] = screenshot("screen-steam-away")
+                ui["away_cpu"] = cpu_average(60)
+                ui["away_daemon"] = agent.request("steam.ui", {}, timeout=30).get("daemon")
+                agent.request("steam.ui", {"state": "visible"}, timeout=30)
+                agent.wait_event("__none__", 15)
+                ui["visible_again_png_bytes"] = screenshot("screen-steam-visible-again")
+                ui["visible_again_cpu"] = cpu_average(60)
+                ui["visible_again_daemon"] = agent.request("steam.ui", {}, timeout=30).get("daemon")
+                log("steam-ui", ui, ok=bool(ui.get("away_daemon")))
+            except Exception as e:  # noqa: BLE001
+                log("steam-ui", f"{e} ({ui})", ok=False)
+            report["steam_ui"] = ui
+
+        # A Steam restart (the next iDeck launch) must not install the
+        # client again: with the bootstrap's package/*.manifest the updater
+        # should report the installed version and skip.
+        if a.steam_apply_update:
             def steam_journal() -> str:
                 return agent.request("logs", {"unit": "ideck-steam.service", "lines": 3000}, timeout=120).get("output", "")
 
-            completes_before = steam_journal().count("Update complete")
+            before = steam_journal().splitlines()
             agent.request("steam.restart", timeout=60)
-            done_at, out = None, ""
+            done_at, new = None, []
             end = time.time() + 25 * 60
             while time.time() < end:
                 agent.wait_event("__none__", 60)
-                out = steam_journal()
-                if out.count("Update complete") > completes_before or "Download skipped" in out:
+                lines = steam_journal().splitlines()
+                new = lines[len(before):] if len(lines) < 3000 else lines
+                text = "\n".join(new)
+                if "Update complete" in text or "Download skipped" in text or "Downloaded new manifest" in text:
                     done_at = round(time.time() - t0, 1)
                     break
             agent.wait_event("__none__", 90)  # let the restarted client write its state
-            out = steam_journal()
-            (a.report / "journal-ideck-steam.service-after-restart.txt").write_text(out)
-            report["steam_update_applied_at"] = done_at
-            log("steam-apply-update", {"done_at": done_at, "updater": steam_updater_summary(out)}, ok=done_at is not None)
-            package_snapshot("after-update")
+            lines = steam_journal().splitlines()
+            new = lines[len(before):] if len(lines) < 3000 else lines
+            (a.report / "journal-ideck-steam.service-after-restart.txt").write_text("\n".join(new))
+            after = steam_updater_summary("\n".join(new))
+            report["steam_after_restart"] = {"checked_at": done_at, **after}
+            log("steam-restart-check", report["steam_after_restart"],
+                ok=done_at is not None and not after["installing"] and not after["pending_downloads"])
+            package_snapshot("after-restart")
 
         try:
             log("selftest", agent.request("selftest.run", timeout=900))

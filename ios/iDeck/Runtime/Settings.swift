@@ -51,6 +51,11 @@ struct Settings: Codable, Equatable {
     /// of the full library and store page: far fewer images and web views.
     /// On by default on iPhone, where the full UI is also hard to read.
     var steamSmallMode = Device.isPhone
+    /// Keeps Steam's UI from drawing while it is not on screen: Linux
+    /// minimises Steam's windows while the iPad shows iDeck's own screens or
+    /// a game, and runs steamwebhelper at the lowest priority while a game
+    /// runs (steam-ui-daemon, runtime 0.1.9+).
+    var steamInBackground = true
     var refreshHz = 60
     var audio = true
     var notifications = true

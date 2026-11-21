@@ -327,10 +327,10 @@ def fetch_package(p: dict, pkg_dir: Path, cache: Path, opener=None) -> tuple[Pat
 
 
 def installed_manifest_name(beta: bool, platform: str = PLATFORM) -> str:
-    """The client's record of what is installed: its manifest's CDN name
-    (steam_client_linuxarm64, steam_client_publicbeta_linuxarm64) plus
-    ".installed", in package/."""
-    return f"steam_client_{'publicbeta_' if beta else ''}{platform}.installed"
+    """The client's copy of the manifest it installed: the manifest's CDN
+    name (steam_client_linuxarm64, steam_client_publicbeta_linuxarm64) plus
+    ".manifest", in package/."""
+    return f"steam_client_{'publicbeta_' if beta else ''}{platform}.manifest"
 
 
 def prune_package_dir(pkg_dir: Path, keep: set[str]) -> int:
@@ -546,12 +546,22 @@ def bootstrap(steam_root: Path, home: Path, cache: Path, beta: bool, full: bool,
         raise BootstrapError("ARM64 client binary steamrtarm64/steam missing or not aarch64 after install")
     if full:
         # The client reads its installed version from a copy of the manifest
-        # it installed, package/<manifest name>.installed (the updater's
-        # strings: "steam_client_", ".installed"; its downloaded manifest is
-        # package/<manifest name>). Without it, runtime 0.1.9's first boot test
-        # logged "installed version 0" and the client queued the whole
-        # client for extraction again although every package file was there.
+        # it installed. Seen in the boot test of 2026-11-14 after the client
+        # installed itself: package/steam_client_linuxarm64.manifest (the
+        # manifest text, byte for byte) next to a 1.5 MB .installed file
+        # list, while the downloaded manifest (no suffix) was gone. Without
+        # the .manifest copy the client logged "installed version 0" and
+        # queued the whole client for extraction again, although every
+        # package file was there.
         write_text_atomic(pkg_dir / installed_manifest_name(beta), text)
+        # Runtime 0.1.9 test builds wrote the manifest to .installed, which
+        # is the client's own file list; remove such a copy.
+        bogus = pkg_dir / installed_manifest_name(beta).replace(".manifest", ".installed")
+        try:
+            if bogus.stat().st_size == len(text.encode()) and bogus.read_text() == text:
+                bogus.unlink()
+        except OSError:
+            pass
     state["status"] = "installed"
     state["updated"] = int(time.time())
     if state_path:

@@ -102,7 +102,7 @@ useradd -m -u 1000 -U -G audio,video,render,input -s /bin/bash deck
 passwd -l root
 passwd -l deck
 systemctl enable ideck-agent.service ideck-home.service ideck-session.service ideck-steam.service \
-    ideck-provision.service ideck-fex-rootfs.service ideck-zram.service systemd-networkd.service systemd-resolved.service
+    ideck-provision.service ideck-fex-rootfs.service ideck-zram.service ideck-steam-ui.service systemd-networkd.service systemd-resolved.service
 systemctl set-default graphical.target
 systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer fstrim.timer \
     getty@tty1.service systemd-networkd-wait-online.service

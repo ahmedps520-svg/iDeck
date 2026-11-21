@@ -27,8 +27,14 @@ struct GameView: View {
             Task { await runtime.startGaming() }
         }
         .persistentSystemOverlays(.hidden)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            runtime.gameViewAppeared()
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            runtime.gameViewDisappeared()
+        }
     }
 
     @ViewBuilder
@@ -49,7 +55,15 @@ struct GameView: View {
                         Button { showKeyboard.toggle() } label: {
                             Label(showKeyboard ? "Hide Keyboard" : "Show Keyboard", systemImage: "keyboard")
                         }
-                        Button { Task { try? await runtime.openSteam("steam://open/downloads") } } label: {
+                        if runtime.steamScreen != .visible {
+                            Button { runtime.setSteamScreen(.visible, reason: "Show Steam") } label: {
+                                Label("Show Steam", systemImage: "macwindow")
+                            }
+                        }
+                        Button {
+                            runtime.setSteamScreen(.visible, reason: "Steam Downloads")
+                            Task { try? await runtime.openSteam("steam://open/downloads") }
+                        } label: {
                             Label("Steam Downloads", systemImage: "arrow.down.circle")
                         }
                         Button { runtime.spice?.resetZoom() } label: {
