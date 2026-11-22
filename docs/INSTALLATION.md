@@ -5,7 +5,7 @@ more of RAM should behave similarly.
 
 ## You need
 
-- the `iDeck.ipa` from the **iOS app** workflow (artifact or release),
+- an IPA from the **iOS app** workflow (artifact or `ios-build-<N>` release), or the update feed in SideStore/AltStore,
 - a published runtime (**Linux runtime** workflow with *publish*),
 - a Windows PC with **Sideloadly**, or **SideStore/AltStore** on the iPad,
 - **StikDebug** 3.1.12 or later on the iPad, with a pairing file and LocalDevVPN set up as its README describes (needed for JIT on iPadOS 26+),
@@ -16,12 +16,23 @@ more of RAM should behave similarly.
 **Sideloadly (Windows):** drag `iDeck.ipa` in and sign with your Apple ID. A free
 account works for 7 days, then re-sign. Install over USB.
 
-**SideStore / AltStore:** add the IPA. These tools register the app group that
-Vulkan needs. If your tool does not, the self-test reports Vulkan as failing and
-OpenGL still works.
+**SideStore / AltStore (build 30+, no PC after SideStore is installed):**
+1. Add the feed: Sources › + ›
+   `https://github.com/ahmedps520-svg/iDeck/releases/download/ios-feed/source.json`
+2. Install iDeck from it. SideStore shows the entitlements first: get-task-allow, the app group, and the memory ones.
+3. New builds then appear as updates, and SideStore refreshes the 7-day signature on the iPad.
 
-The IPA must be **development-signed** (these tools do that), because that keeps
-`get-task-allow`, which JIT needs.
+Before you switch, note:
+- SideStore installs iDeck as `com.ideck.app.<team ID>`, a separate app from a Sideloadly install. Linux setup, the Steam sign-in and game downloads start over in it. Deleting the Sideloadly copy deletes its data.
+- A free Apple ID allows 3 sideloaded apps at once, and SideStore counts as one.
+- Details: [DISTRIBUTION](DISTRIBUTION.md#update-feed-for-sidestore-and-altstore-build-30).
+
+The feed's IPA (`iDeck-SideStore.ipa`) declares the app group `group.ideck`, so
+SideStore registers it. Vulkan can then use real shared memory; without it, iDeck
+uses file-backed memory (build 24+). The plain `iDeck.ipa` is for Sideloadly.
+
+The IPA must be **development-signed** (all of these tools do that), because that
+keeps `get-task-allow`, which JIT needs.
 
 ## 2. Enable JIT
 

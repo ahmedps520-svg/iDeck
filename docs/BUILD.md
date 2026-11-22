@@ -50,7 +50,8 @@ Run **Actions → iOS app → Run workflow** with edition `sideload`.
 1. `ios/scripts/fetch_sysroot.sh ios` provides UTM 5.0.8's iOS dependency sysroot (QEMU 10.0.12-utm, virglrenderer with Venus, MoltenVK, ANGLE, spice-gtk, GLib, GStreamer). It first tries UTM's published release-build artifact. Otherwise it builds the sysroot from source with UTM's `build_dependencies.sh` at the pinned commit (1.5–3 h, cached afterwards).
 2. `gen_sysroot_xcconfig.sh` writes the link flags. `xcodegen generate` creates `ios/iDeck.xcodeproj` from `ios/project.yml`.
 3. `xcodebuild archive` runs with signing disabled. A build phase embeds all sysroot frameworks (QEMU is loaded with `dlopen` at runtime), QEMU's data files and the Vulkan ICD manifests.
-4. `package_ipa.sh` produces `iDeck.ipa`, which is uploaded as an artifact (and as a release asset for `v*` tags).
+4. `package_ipa.sh` produces `iDeck.ipa` (unsigned, for Sideloadly) and `iDeck-SideStore.ipa` (main executable ad-hoc signed with `iDeck-SideStore.entitlements` by `ldid`). Both are uploaded as an artifact, and as release assets for `v*` tags.
+5. With *publish* (the default), the `publish` job releases both IPAs as `ios-build-<N>`, rewrites the SideStore/AltStore feed `ios-feed/source.json` with `tools/make_altsource.py`, and downloads the feed and IPA again to check them ([DISTRIBUTION](DISTRIBUTION.md#update-feed-for-sidestore-and-altstore-build-30)).
 
 The app reads its runtime from
 `https://github.com/<your repo>/releases/download/runtime-latest/manifest.json`,

@@ -383,6 +383,28 @@ The kernel's own messages, reported by the agent:
 - shellcheck of `steam-ui-daemon`;
 - the signing-profile parser checks.
 
+### Build 30: SideStore/AltStore update feed (CI and this PC, 2026-11-22)
+
+`ios.yml` run 45011924870 (commit 0703c75). Both jobs passed: `sideload`, and `publish`, which releases the build and updates the feed.
+
+**IPAs** (release `ios-build-30`):
+- `iDeck.ipa`: 19,085,649 bytes, unsigned (no entitlements), for Sideloadly.
+- `iDeck-SideStore.ipa`: 19,123,895 bytes, SHA-256 `048b52a0…70007787`. `ldid -e` shows the four entitlements of `iDeck-SideStore.entitlements`, including the app group `group.ideck`.
+- Both IPAs: CFBundleShortVersionString `0.1.30` (builds up to 29 were `0.1.0`), CFBundleVersion `30`.
+- Both contain the same 198 files. Only the main executable differs. The dependency check finds nothing missing in either.
+
+**Feed** (`ios-feed/source.json`):
+- The publish job wrote it from the IPA (no earlier feed existed).
+- It then downloaded the feed and the IPA again, as SideStore does, and checked them against each other: version, build, size, SHA-256, four entitlements and two privacy keys all matched.
+- The same check (`--verify-url`, `--expect-version 0.1.30`) passed from this PC through GitHub's 302 redirect. The icon downloaded (36,105 bytes).
+
+**Tests:** `tools/tests` ran 20 tests, all passed, on Windows and in CI's lint job (CI run 45011924360, every job passed). They use synthetic signed thin and fat Mach-Os and a local web server that redirects like GitHub.
+
+**Not tried yet on a device:**
+- adding the feed and installing from it in SideStore;
+- whether SideStore registers `group.ideck.<team ID>` and Venus then uses real shared memory;
+- an update from build 30 to 31.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

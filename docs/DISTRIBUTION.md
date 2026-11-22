@@ -10,7 +10,7 @@
 | QEMU build | TCG JIT (`sysroot-iOS-arm64`) | TCI interpreter (`sysroot-iOS-TCI-arm64`) |
 | Games | the target | not realistic: the interpreter is orders of magnitude slower |
 | Validity | 7 days (free Apple ID) or 1 year (paid) | 90 days per build |
-| Built by | `ios.yml` → `sideload` job (unsigned IPA) | `ios.yml` → `testflight` job (needs App Store Connect API secrets) |
+| Built by | `ios.yml` → `sideload` job (unsigned IPA, plus the SideStore/AltStore IPA and feed) | `ios.yml` → `testflight` job (needs App Store Connect API secrets) |
 
 Why TestFlight cannot have JIT (as of November 2026):
 
@@ -55,7 +55,7 @@ pairing. Not implemented.
 | Entitlement | Purpose | Free Apple ID |
 |---|---|---|
 | `get-task-allow` | debugger attach → JIT | yes (development signing) |
-| `com.apple.developer.kernel.increased-memory-limit` | larger jetsam limit | yes (per Henge's signing notes) |
+| `com.apple.developer.kernel.increased-memory-limit` | larger jetsam limit | per Henge's signing notes, yes. SideStore drops it for free accounts: its allow-list for free teams is app groups and inter-app audio (`SideSign` `Feature.freeFeatures`, checked 2026-11-22). |
 | `com.apple.developer.kernel.extended-virtual-addressing` | more VA for guest RAM + dual JIT mapping | **no**, so sideloaders drop it |
 | `com.apple.security.application-groups` | lets virglrenderer `shm_open` Venus blob memory in the sandbox | depends on the sideloading tool: Sideloadly with a free account signs **none** (seen on device: `signature: app groups []`) |
 
@@ -106,8 +106,44 @@ RAM at about 40% of device RAM:
 - 8 GB devices get 3 GiB;
 - 12 GB devices get 4 GiB.
 
+## Update feed for SideStore and AltStore (build 30+)
+
+Feed URL (add it in SideStore under Sources › +):
+
+    https://github.com/ahmedps520-svg/iDeck/releases/download/ios-feed/source.json
+
+On the iPad, `sidestore://source?url=` followed by that URL opens SideStore's
+add-source dialog.
+
+**What is published.** Every `ios.yml` run with *publish* (on by default,
+bundle `com.ideck.app`, from `main`):
+1. creates the release `ios-build-<N>` with two IPAs;
+2. replaces `source.json` and `icon.png` in the `ios-feed` release (the feed keeps the 20 newest builds);
+3. downloads the published feed and its IPA again, as SideStore does, and checks them against each other.
+
+| IPA | For | Signature |
+|---|---|---|
+| `iDeck-SideStore.ipa` | SideStore, AltStore (the feed points here) | main executable ad-hoc signed with `ios/iDeck/Support/iDeck-SideStore.entitlements`, so the store requests the app group |
+| `iDeck.ipa` | Sideloadly | unsigned, as before |
+
+**How the feed is built** (`tools/make_altsource.py`). SideStore and AltStore refuse an IPA that differs from its feed entry, so every checked value is read from the IPA itself:
+- `version` and `buildVersion` from Info.plist;
+- the file's size and SHA-256;
+- `appPermissions`: the entitlements in the code signature, and every `*UsageDescription` key.
+
+**Version numbers.** SideStore offers an update only when `version` (CFBundleShortVersionString) increases; it compares major.minor.patch, not the build number. Builds up to 29 were all `0.1.0`. From build 30 the version is `0.1.<build>`.
+
+**What changes when SideStore installs iDeck.** Read from SideStore's source (`develop`, 2026-11-22); not yet tried on a device:
+- **Bundle ID:** SideStore appends your team ID (`com.ideck.app.<team ID>`). The result is a second app next to a Sideloadly install, with its own data. Linux, the Steam sign-in and installed games are not shared, so setup runs again.
+- **App group:** registered, because the IPA declares `group.ideck`. SideStore renames it to `group.ideck.<team ID>` (22 characters). Shared-memory names allow at most 28 characters for the group, so Venus can use real POSIX shared memory instead of the file fallback. `group.com.ideck.app` would have become 30 characters and failed that check.
+- **Memory entitlements:** requested only with a paid account. A free account gets neither `increased-memory-limit` nor `extended-virtual-addressing` from SideStore.
+- **JIT:** unchanged. SideStore signs with a development profile, which carries `get-task-allow`. iDeck's StikDebug link uses the app's actual bundle ID.
+- **Refresh:** SideStore re-signs its apps on the iPad before the 7 days run out. No PC is needed after SideStore itself is installed, but SideStore needs its pairing file and VPN set up.
+- **Free Apple ID limits** (Apple's): 3 sideloaded apps at a time per device, and SideStore itself is one of them; 10 new App IDs per 7 days.
+
 ## Building without a Mac
 
 Everything Apple-specific runs on GitHub's macOS runners ([BUILD](BUILD.md)).
-You download `iDeck.ipa` from the workflow run or the release and sign and
-install it from Windows with Sideloadly, or on-device with SideStore or AltStore.
+You download an IPA from the workflow run or the `ios-build-<N>` release and
+sign and install it from Windows with Sideloadly. Or you add the update feed
+to SideStore or AltStore on the device (see above).

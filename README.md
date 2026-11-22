@@ -34,7 +34,7 @@ Details: [ARCHITECTURE](docs/ARCHITECTURE.md).
 
 ## What you do
 
-1. Install the IPA. It is built by GitHub Actions, and you sign it with your Apple ID using Sideloadly, AltStore or SideStore.
+1. Install the IPA. It is built by GitHub Actions, and you sign it with your Apple ID using Sideloadly, AltStore or SideStore. SideStore and AltStore can take the update feed instead: `https://github.com/ahmedps520-svg/iDeck/releases/download/ios-feed/source.json` ([INSTALLATION](docs/INSTALLATION.md)).
 2. Enable JIT with StikDebug and open iDeck.
 3. Tap **Install iDeck**. It downloads and verifies the Linux runtime, creates game storage and boots Linux. Linux then installs Steam and checks graphics, audio and controllers.
 4. Tap **Start Gaming**. The Steam client opens. Sign in and install a game.
