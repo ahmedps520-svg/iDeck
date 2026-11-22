@@ -137,5 +137,15 @@ if let w = weekly {
 check(SigningProfile.remaining(1800) == "less than an hour", "under an hour")
 check(SigningProfile.remaining(-1) == nil, "expired -> nil")
 
+// APP_SANDBOX_GROUP_ID for QEMU (ShmGroup.swift).
+check(ShmGroup.forQEMU(usable: "group.ideck.ABCDE12345", fileFallback: false) == "group.ideck.ABCDE12345",
+      "a working app group is passed on")
+check(ShmGroup.forQEMU(usable: nil, fileFallback: true) == ShmGroup.fallback,
+      "no working group + file fallback -> short fallback name")
+check(ShmGroup.forQEMU(usable: "group.com.ideck.app.ABCDE12345", fileFallback: true) == ShmGroup.fallback,
+      "a 30-character group is never passed (anon_file.c refuses it before shm_open)")
+check(ShmGroup.forQEMU(usable: nil, fileFallback: false) == nil, "nothing usable -> unset")
+check(ShmGroup.fallback.count <= ShmGroup.maxLength && ShmGroup.fallback.hasPrefix("group."), "fallback name fits")
+
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

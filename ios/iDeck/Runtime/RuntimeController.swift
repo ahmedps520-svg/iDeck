@@ -461,7 +461,8 @@ final class RuntimeController: ObservableObject {
             warnings.append("Vulkan is off for this session: no GPU shared memory (\(problem)). OpenGL still works.")
             DiagLog.write("vulkan: off, GPU shared memory unavailable: \(problem)")
         } else if cfg.vulkan, RuntimeController.sharedMemory.fileFallback {
-            DiagLog.write("vulkan: on, Venus blob memory file-backed (\(Paths.gpuSharedMemory.lastPathComponent))")
+            DiagLog.write("vulkan: on, Venus blob memory file-backed (\(Paths.gpuSharedMemory.lastPathComponent)), "
+                          + "APP_SANDBOX_GROUP_ID \(ShmGroup.fallback)")
         }
         cfg.gl = !s.safeGraphics
         if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
@@ -515,15 +516,18 @@ final class RuntimeController: ObservableObject {
             .appendingPathComponent("icd.d/MoltenVK_icd.json"), FileManager.default.fileExists(atPath: icd.path) {
             env["VK_DRIVER_FILES"] = icd.path
         }
-        if let group = RuntimeController.sharedMemory.group ?? IDPlatform.applicationGroupIdentifier {
+        let shm = RuntimeController.sharedMemory
+        if let group = ShmGroup.forQEMU(usable: shm.group, fileFallback: shm.fileFallback) {
             // virglrenderer creates Venus blob memory with shm_open(), which
-            // the sandbox only allows under the app group prefix.
+            // the sandbox only allows under an app group in the signature;
+            // otherwise the file fallback answers under ShmGroup.fallback.
             env["APP_SANDBOX_GROUP_ID"] = group
-            if let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) {
-                let shm = Paths.ensure(container.appendingPathComponent("tmp", isDirectory: true))
-                env["XDG_RUNTIME_DIR"] = shm.path
+            if group == shm.group,
+               let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) {
+                let dir = Paths.ensure(container.appendingPathComponent("tmp", isDirectory: true))
+                env["XDG_RUNTIME_DIR"] = dir.path
             }
-        } else if settings.vulkan && !RuntimeController.sharedMemory.fileFallback {
+        } else if settings.vulkan {
             warnings.append("No app group in the signing profile and no file fallback: Vulkan (Venus) blob memory will fail.")
         }
         return env

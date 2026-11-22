@@ -14,6 +14,14 @@
 __attribute__((visibility("default"))) int user_create_anonymous_file(off_t size) {
     const char *group = getenv("APP_SANDBOX_GROUP_ID");
     if (group && !group[0]) group = NULL;
+    // UTM's anon_file.c gives up on long group names before any shm_open
+    // (seen on the iPad, build 30: "APP_SANDBOX_GROUP_ID is 30 chars, at most
+    // 28 fit"), so the stand-in never sees a call to redirect.
+    if (group && strlen(group) > 28) {
+        fprintf(stderr, "APP_SANDBOX_GROUP_ID is %zu chars, at most 28 fit\n", strlen(group));
+        errno = ENAMETOOLONG;
+        return -1;
+    }
     const unsigned int nonce = arc4random() >> 4;
     int fd = -1;
     for (unsigned int slot = 0; slot < 16; slot++) {

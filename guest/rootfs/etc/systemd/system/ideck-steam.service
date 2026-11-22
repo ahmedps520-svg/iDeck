@@ -17,8 +17,10 @@ Group=deck
 Type=simple
 ExecStart=/usr/lib/ideck/ideck-steam-launch
 # Steam exits normally when the user quits it; the app offers to restart.
+# After a crash (seen on the iPad: SIGSEGV 2.5 min after start, build 30)
+# it comes back after 5 s; the start limit below still stops a loop.
 Restart=on-failure
-RestartSec=20
+RestartSec=5
 TimeoutStopSec=30
 KillMode=mixed
 LimitNOFILE=524288

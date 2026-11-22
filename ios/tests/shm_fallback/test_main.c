@@ -131,6 +131,31 @@ int main(int argc, char **argv) {
     CHECK(twice("group.com.ideck.app/dup") == 0, "a second O_EXCL open of the same name must fail with EEXIST");
     CHECK(count_files(dir) == 0, "the duplicate-name file was not removed");
 
+    // iloader's group.com.ideck.app.<team ID> is 30 characters: anon_file.c
+    // refuses it before shm_open, so no fallback can help (iPad, build 30).
+    setenv("APP_SANDBOX_GROUP_ID", "group.com.ideck.app.ABCDE12345", 1);
+    id_shm_fallback_get_stats(&st);
+    const unsigned long opens_before_long = st.opens;
+    errno = 0;
+    CHECK(create(16384) < 0 && errno == ENAMETOOLONG, "a 30-character group must be refused like anon_file.c does");
+    id_shm_fallback_get_stats(&st);
+    CHECK(st.opens == opens_before_long, "the long group must not reach shm_open (opens %lu -> %lu)",
+          opens_before_long, st.opens);
+    // iDeck passes ShmGroup.fallback instead: short, in no signature, so the
+    // real shm_open is refused and the stand-in opens a file.
+    setenv("APP_SANDBOX_GROUP_ID", "group.ideck", 1);
+    const unsigned long files_before = st.file_opens;
+    int short_fd = create((off_t)(1 << 20));
+    CHECK(short_fd >= 0, "allocation under the short fallback group failed: %s", strerror(errno));
+    if (short_fd >= 0) {
+        check_mapping(short_fd, 1 << 20, "fallback-group allocation");
+        close(short_fd);
+    }
+    id_shm_fallback_get_stats(&st);
+    CHECK(st.file_opens == files_before + 1, "file opens %lu -> %lu, want one more for the fallback group",
+          files_before, st.file_opens);
+    CHECK(count_files(dir) == 0, "%d files left after the fallback-group allocation", count_files(dir));
+
     char err[256] = "";
     CHECK(id_shm_fallback_selftest(1 << 20, err, sizeof err) == 0, "selftest: %s", err);
 
