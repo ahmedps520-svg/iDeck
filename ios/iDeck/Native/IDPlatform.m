@@ -56,6 +56,21 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
     return info.phys_footprint;
 }
 
++ (NSString *)addressSpaceSummary {
+    // How much virtual address space the process has and uses: the TCG
+    // cache is mapped twice (split-wx) and guest RAM is a file mapping, and
+    // without extended-virtual-addressing the range is limited.
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return @"unknown";
+    const double gib = 1024.0 * 1024.0 * 1024.0;
+    NSString *range = count >= TASK_VM_INFO_REV2_COUNT && info.max_address > info.min_address
+        ? [NSString stringWithFormat:@"range %.1f GiB (0x%llx-0x%llx)", (info.max_address - info.min_address) / gib,
+                                     (unsigned long long)info.min_address, (unsigned long long)info.max_address]
+        : @"range unknown";
+    return [NSString stringWithFormat:@"virtual %.1f GiB, %@", info.virtual_size / gib, range];
+}
+
 + (uint64_t)physicalMemory {
     return NSProcessInfo.processInfo.physicalMemory;
 }

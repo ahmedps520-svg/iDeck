@@ -148,8 +148,45 @@ TEST("memory: 12 GB iPad with a 6 GB limit gets 3 GiB") {
     MemoryPlan p = plan_memory(in);
     CHECK(p.fits);
     CHECK_EQ(p.guest_mb, 3072u);
-    CHECK_EQ(p.tb_cache_mb, 384u);
+    CHECK_EQ(p.tb_cache_mb, 1024u);   // headroom goes to the TCG cache
     CHECK(p.guest_mb + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 6144u);
+}
+
+TEST("memory: TCG cache grows into headroom, never past the limit") {
+    // iPad run of build 30 (iloader, paid team): iPad17,2, 11524 MiB RAM,
+    // limit 12288 MiB with increased-memory-limit, 6 vCPUs (Performance),
+    // file-backed guest RAM, Vulkan on. Build 30 used 384 MiB.
+    MemoryInputs in;
+    in.physical_mb = 11524;
+    in.app_limit_mb = 12288;
+    in.increased_memory_limit = true;
+    in.cpus = 6;
+    in.ram_file = true;
+    MemoryPlan p = plan_memory(in);
+    CHECK(p.fits);
+    CHECK_EQ(p.guest_mb, 4096u);
+    CHECK_EQ(p.tb_cache_mb, 1024u);
+    // Free Apple ID on the same iPad (measured limit 5120 MiB): still fits.
+    in.app_limit_mb = 5120;
+    in.increased_memory_limit = false;
+    in.cpus = 4;
+    p = plan_memory(in);
+    CHECK_EQ(p.guest_mb, 4096u);
+    CHECK_EQ(p.tb_cache_mb, 1024u);
+    CHECK(p.guest_mb / 4 + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 5120u);
+    // 8 GB device: only part of the step fits.
+    in.physical_mb = 7680;
+    in.app_limit_mb = 3400;
+    p = plan_memory(in);
+    CHECK_EQ(p.guest_mb, 3072u);
+    CHECK_EQ(p.tb_cache_mb, 768u);
+    CHECK(p.guest_mb / 4 + p.tb_cache_mb + p.gpu_budget_mb + p.overhead_mb <= 3400u);
+    // Nothing fits: the cache stays at its base size.
+    in.app_limit_mb = 2000;
+    in.ram_file = false;
+    p = plan_memory(in);
+    CHECK(!p.fits);
+    CHECK_EQ(p.tb_cache_mb, 256u);
 }
 
 TEST("memory: measured M5 limit (5120 MiB) gives a 3 GiB guest") {

@@ -19,6 +19,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (class, nonatomic, readonly) uint64_t availableMemory;
 /// task_vm_info.phys_footprint: what jetsam charges this app.
 @property (class, nonatomic, readonly) uint64_t physFootprint;
+/// "virtual 9.8 GiB, range 61.0 GiB (0x...-0x...)" from TASK_VM_INFO.
+@property (class, nonatomic, readonly) NSString *addressSpaceSummary;
 @property (class, nonatomic, readonly) uint64_t physicalMemory;
 /// e.g. "iPad17,1"
 @property (class, nonatomic, readonly) NSString *modelIdentifier;

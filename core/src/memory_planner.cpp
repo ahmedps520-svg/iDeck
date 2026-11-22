@@ -25,6 +25,16 @@ uint64_t tb_cache_for(uint64_t guest_mb) {
     return 512;
 }
 
+// Larger caches tried once the guest tier is chosen, while they still fit.
+// Steam's UI (Chromium) translates far more code than 384 MiB holds: CI boot
+// tests (runtime.yml, 2026-11-22, Steam sign-in window and restarts) counted
+// full cache flushes of 19 before the window and 35 in total at 384 MiB,
+// 5 and 9 at 1024, 2 and 4 at 2048. Every flush stops all vCPUs and the
+// code is translated again. The cap is 1024 MiB because split-wx maps the
+// buffer twice and iDeck runs without the extended-virtual-addressing
+// entitlement; the boot log records the address space to revisit this.
+constexpr uint64_t kTbCacheSteps[] = {512, 768, 1024};
+
 uint64_t gpu_budget_for(uint64_t guest_mb, bool vulkan) {
     if (!vulkan) return 384;
     // Venus allocations (textures, buffers, pipelines) live in host Metal
@@ -127,6 +137,13 @@ MemoryPlan plan_memory(const MemoryInputs& in) {
     p.guest_mb = chosen;
     p.tb_cache_mb = tb_cache_for(chosen);
     p.gpu_budget_mb = gpu_budget_for(chosen, in.vulkan);
+    if (p.fits) {
+        // Spend left-over headroom on the TCG cache (see kTbCacheSteps).
+        const uint64_t rest = charged_guest(chosen) + p.gpu_budget_mb + p.overhead_mb;
+        for (uint64_t tb : kTbCacheSteps) {
+            if (tb > p.tb_cache_mb && rest + tb <= limit) p.tb_cache_mb = tb;
+        }
+    }
     // The hostmem BAR is guest-physical address space for mapping Venus
     // blobs; it is not allocated up front. Kept moderate to limit host VA use.
     p.hostmem_mb = in.vulkan ? (chosen >= 4096 ? 4096 : 2048) : 0;

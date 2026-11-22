@@ -601,6 +601,7 @@ final class RuntimeController: ObservableObject {
         case "ready":
             DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")"
                           + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
+            DiagLog.write("address space with Linux running: \(IDPlatform.addressSpaceSummary)")
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running
