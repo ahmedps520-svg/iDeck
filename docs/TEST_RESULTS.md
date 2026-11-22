@@ -333,6 +333,56 @@ Not run on a device yet:
 - the new behaviour;
 - what actually ends sessions there (**not yet known**).
 
+### Linux runtime 0.1.9 and builds 27–29 (CI, 2026-11-12 to 2026-11-22)
+
+All of this was measured on GitHub `ubuntu-24.04-arm` runners under Ubuntu's QEMU 8.2 TCG (4 vCPU, 4 GiB, `neoverse-n1`). None of it has been run on a device yet.
+
+**1. Kernel page-table isolation (`kpti=0`).** The A/B benchmark ran in each of the runtime runs below (43218566550, 43223248641, 43577647630, 44962279654). The kernel command lines were identical apart from `kpti=0`.
+
+| Run | KPTI on: syscall / mem latency / memcpy | `kpti=0`: syscall / mem latency / memcpy | Boot to agent (on → off) |
+|---|---|---|---|
+| 43218566550 | 20,689 ns / 426 ns / 388 MB/s | 2,907 ns / 206 ns / 1,106 MB/s | 33.2 → 21.8 s |
+| 43223248641 | 20,282 ns / 423 ns / 363 MB/s | 2,904 ns / 216 ns / 1,013 MB/s | 32.7 → 22.0 s |
+| 44962279654 | 21,296 ns / 424 ns / 355 MB/s | 2,865 ns / 219 ns / 997 MB/s | 33.3 → 21.6 s |
+
+The kernel's own messages, reported by the agent:
+- without `kpti=0`: `CPU features: kernel page table isolation forced ON by KASLR`;
+- with it: `… forced OFF by kpti command line option`.
+
+**2. Steam's package files and installed version.**
+
+| Run | Bootstrap wrote | Steam's first start | After a Steam restart |
+|---|---|---|---|
+| 0.1.8 device log (2026-11-12) | nothing kept | "Package file … missing" for all 34 packages; 574,010 KB download, then extract | — |
+| 43218566550 | VZ copies in `package/` | 0 missing, 0 downloads; "installed version 0", "uninstalled manifest found" | not tested |
+| 43223248641 | + manifest copy as `.installed` | same: "installed version 0" | not tested |
+| 43577647630 | same | same | Steam restarted and installed itself: extract 2 min 43 s, then install 44 s. Afterwards `package/` held `steam_client_linuxarm64.manifest` (the manifest, 12,393 bytes) and a 1,550,574-byte `.installed`, and all 34 archives (684,921,978 bytes) were still there. |
+| 44962279654 | VZ copies + `steam_client_linuxarm64.manifest` | **"Download skipped: … version 1794536281, installed version 1794536281"**, "Nothing to do" | **Same "Download skipped", no install** |
+
+**3. Steam's UI while away** (run 44962279654, build 29's `steam-ui-daemon`, Steam sign-in window):
+- Guest CPU, 60 s average across 4 vCPUs:
+  - window shown: 22.5%;
+  - `away` (1 window minimised, 7 `steamwebhelper` processes at nice 19): 13.5%;
+  - shown again: 18.5%.
+- Screenshots: the `away` frame is the empty desktop (4,319 bytes). The `visible` frame shows the sign-in window again (34,414 bytes).
+- Only the sign-in screen can be measured in CI, since there is no Steam account. On the library page, which animates and loads images, the saving is expected to be larger, but that is not measured.
+
+**Other results.**
+- Steam's real UI appeared in every 0.1.9 run, about 2.5 min after Steam started. 0.1.8 showed only "Steamwebhelper is not responding".
+- The whole boot test now takes 12 to 25 min, against 1 to 3 hours before.
+
+**Published:** runtime 0.1.9 (run 44965400192, 2026-11-22). The image was rebuilt from the boot-tested commit `6d37c18` with the boot test skipped, so its Debian packages were fetched again on that day. `system.img.xz` is 329,889,656 bytes. `runtime-latest/manifest.json` now names 0.1.9.
+
+**App builds:**
+- **Build 27** (run 43217211098): IPA compiled.
+- **Build 28** (run 43218571816): 19,079,908 bytes, CFBundleVersion 28; 37 frameworks embedded, none missing; `kpti=0`, the signing-profile and memory-check strings present. Sent to the user on 2026-11-14.
+- **Build 29** (run 44962282335): 19,085,630 bytes, CFBundleVersion 29, `UIDeviceFamily` [1, 2]; none missing; the Steam-UI strings present.
+
+**CI checks (runs 43218534695, 43223248162, 43577647716, 44962279257):** every job passed, including:
+- the CI test that decodes a real VZ package from Valve's CDN and compares it file by file with the plain zip;
+- shellcheck of `steam-ui-daemon`;
+- the signing-profile parser checks.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

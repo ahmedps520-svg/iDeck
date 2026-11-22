@@ -30,6 +30,7 @@ QMP `block_resize`, and the agent runs `resize2fs` online.
 | `ideck-steam.service` | `ideck-steam-launch`: bootstraps Steam if needed, then runs `steamrtarm64/steam` |
 | `ideck-provision.service` | First-boot setup, idempotent. Later boots take a fast path. |
 | `ideck-fex-rootfs.service` | Loop-mounts the FEX RootFS from the library disk at `/usr/share/guestos/fex-mesa` |
+| `ideck-steam-ui.service` | `steam-ui-daemon` (runtime 0.1.9+): minimises Steam's windows while the iPad does not show them and lowers steamwebhelper's priority during games. See [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen). |
 
 Journald keeps logs in RAM, and the apt/man/fstrim timers are masked so there is
 less background work under emulation.

@@ -31,6 +31,12 @@
 - **Memory:** jetsam-aware guest sizing; a bounded TCG cache; balloon with free-page reporting; on pressure the guest drops caches, the balloon inflates, disks sync and UI caches are released. Journald runs in RAM; `vm.swappiness=0`.
 - **CPU:** MTTCG; the `neoverse-n1` model avoids PAuth/SVE emulation costs (V1, N2 and A710 start with `pauth=off,sve=off` since build 28); performance profiles set 2, 4 or 6 vCPUs; the agent's input path runs on its own thread.
 - **Kernel:** `mitigations=off nowatchdog kpti=0 transparent_hugepage=never`. `kpti=0` (build 28 / runtime 0.1.9) made system calls 7× faster in CI; see below.
+- **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9, `steam-ui-daemon`):
+  - Steam's windows are minimised while the iPad shows iDeck's screens or a game, so Chromium stops drawing them.
+  - `steamwebhelper` runs at nice 19 during games.
+  - CI, sign-in window: guest CPU 22.5% shown, 13.5% hidden, 18.5% shown again (4 vCPUs, 60 s averages).
+  - Details in [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen).
+- **No second Steam install after setup** (runtime 0.1.9): the bootstrap keeps Steam's package files and its installed-manifest copy. The client's first start now skips the 574 MB re-download and the 5–7 minutes of extraction.
 - **GPU:** zero-copy SPICE GL scanout into an MTKView; frames are presented on display refresh (`preferredFramesPerSecond = 120`) and drawn only when new.
 - **Storage:** raw sparse images with `discard=unmap`, `detect-zeroes=unmap`, `aio=threads`; no qcow2 overhead; APFS clones for snapshots.
 - **Background work:** apt/man/fstrim timers are masked, and no desktop environment runs.
@@ -126,7 +132,7 @@ Ordered by expected gain. None of these has been measured yet.
    - `DiskCache`, FEX's code cache (FEX 2609; Valve enabled it for Proton Experimental ARM).
    - Open question: whether the FEX that Steam's ARM64 client runs reads these files. Needs a game test on the device.
 2. **Steam launch flags.** `-cef-disable-hang-timeouts`, `-cef-in-process-gpu`, `-cef-disable-site-isolation` and `-cef-disable-js-logging` exist in the client's option list. Each one needs an A/B run on the device; any of them could crash the web helper.
-3. **Keep Steam's UI idle while a game runs.** I found no evidence that Steam pauses `steamwebhelper` during play. Minimising Steam's windows, or starting with `-silent` once signed in, would leave the CPU to the game. Behaviour under openbox (no tray) is unknown.
+3. ~~Keep Steam's UI idle while a game runs.~~ Done in build 29 by minimising Steam's windows and running `steamwebhelper` at nice 19 (see above). Not done: starting Steam with `-silent` once signed in. That would skip building the library window at startup, but CI cannot test it without an account.
 4. **`-noshaders` / no shader pre-caching.** Fossilize already runs at idle priority. Under MoltenVK the host compiles shaders anyway, so pre-caching is probably wasted work.
 5. **`-cpu max,pauth=off,sve=off,sme=off`.** It has E0PD and FEAT_MOPS, and glibc 2.41 uses MOPS `memcpy`, which QEMU implements with host `memmove`. It could raise memcpy further. Risk: many more CPU features under emulation.
 6. **Smaller kernel options:** `audit=0`, `init_on_alloc=0`. Probably small gains.

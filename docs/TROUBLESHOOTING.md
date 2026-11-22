@@ -21,6 +21,7 @@
 | "JIT was enabled N seconds ago…" / iDeck closed with SIGTRAP in `tcg_region_init` | StikDebug attached long before Linux started (e.g. during a runtime download) and no longer answered QEMU's JIT request | Close iDeck from the app switcher, enable JIT again in StikDebug, then continue. Since build 17 iDeck asks for this instead of crashing. |
 | Self-test: opengl shows llvmpipe | virgl not active | Check the QEMU log for `virtio-gpu-gl`/ANGLE errors. Reinstall the IPA (embedded frameworks). |
 | Steam window blank or crashes (CEF) | steamwebhelper GPU path | Settings › Software-rendered Steam UI (on by default since build 24). Steam restarts by itself. |
+| Linux screen is empty (no Steam window), e.g. after closing a game (build 29+) | Steam's windows are minimised while it is not on screen, and the app shows them again when a game ends | Tap ⋯ › Show Steam. Settings › Steam › "Pause Steam's window when it is not on screen" turns this off. |
 | Steam slow or heavy with no game open | The Steam UI is a Chromium app running on an emulated CPU | Settings › Lightweight Steam and Compact library (Small Mode). In Steam: turn off Shader Pre-Caching, the Steam Overlay and smooth scrolling, and turn on Library › Low Performance Mode. Use Battery Saver or 540p on an iPhone if it gets hot. |
 | Text too small on iPhone | 1280×720 Linux display on a phone screen | Pinch to zoom; two fingers move the zoomed view; ⋯ › Reset Zoom |
 | Steam stuck updating | First update under emulation is slow | Wait. Progress is visible in the Steam window. |
