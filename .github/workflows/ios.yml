@@ -5,6 +5,9 @@ name: iOS app
 #              your Apple ID; development signing keeps get-task-allow for JIT)
 #   testflight interpreter (TCI) edition, signed and uploaded to TestFlight
 #              when App Store Connect API secrets are configured
+#   publish    (sideload, bundle com.ideck.app) release ios-build-<N> with both
+#              IPAs and add the build to the SideStore/AltStore feed:
+#              https://github.com/<repo>/releases/download/ios-feed/source.json
 
 on:
   workflow_dispatch:
@@ -16,6 +19,10 @@ on:
       bundle_id:
         description: Bundle identifier
         default: com.ideck.app
+      publish:
+        description: Publish the sideload build as a release and in the SideStore/AltStore feed
+        type: boolean
+        default: true
   push:
     tags: ["v*"]
 
@@ -26,6 +33,9 @@ env:
   # macOS runner image with Xcode 26+ (UTM 5's sysroot is built against the
   # iOS 26 SDK). Override with the repository variable IDECK_MACOS_RUNNER.
   BUNDLE_ID: ${{ inputs.bundle_id || 'com.ideck.app' }}
+  # CFBundleShortVersionString. SideStore only offers an update when this
+  # increases (it compares major.minor.patch), so the build number is in it.
+  APP_VERSION: 0.1.${{ github.run_number }}
 
 jobs:
   sideload:
@@ -41,7 +51,7 @@ jobs:
           xcodebuild -version
       - name: Tools
         run: |
-          brew install xcodegen
+          brew install xcodegen ldid
           # Only needed when UTM's dependencies are built from source.
           brew install bison pkg-config gettext glib libgpg-error nasm meson || true
           pip3 install --break-system-packages six pyparsing || pip3 install six pyparsing || true
@@ -68,15 +78,29 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/iDeck.xcarchive archive \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             IDECK_BUNDLE_ID="$BUNDLE_ID" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            MARKETING_VERSION="$APP_VERSION" \
             IDECK_MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/runtime-latest/manifest.json" \
             | tee build/xcodebuild.log | grep -E '(error|warning: unable|BUILD|ARCHIVE)' || true
           test -d build/iDeck.xcarchive/Products/Applications/iDeck.app
-      - name: Package IPA
-        run: bash ios/scripts/package_ipa.sh build/iDeck.xcarchive build/iDeck.ipa
+      - name: Package IPAs
+        run: |
+          set -euo pipefail
+          # Sideloadly: unsigned, as before.
+          bash ios/scripts/package_ipa.sh build/iDeck.xcarchive build/iDeck.ipa
+          # SideStore / AltStore: entitlements embedded so they request the app group.
+          bash ios/scripts/package_ipa.sh build/iDeck.xcarchive build/iDeck-SideStore.ipa \
+            ios/iDeck/Support/iDeck-SideStore.entitlements
+          python3 tools/make_altsource.py --ipa build/iDeck-SideStore.ipa --print-ipa \
+            --require-entitlement get-task-allow --require-entitlement com.apple.security.application-groups \
+            | tee build/ipa-info.json
+          python3 -c 'import json,sys; i=json.load(open("build/ipa-info.json")); v=sys.argv[1]; assert i["version"]==v and i["build"]==sys.argv[2], (i["version"], i["build"], v)' \
+            "$APP_VERSION" "${{ github.run_number }}"
       - uses: actions/upload-artifact@v4
         with:
           name: iDeck-sideload-ipa
-          path: build/iDeck.ipa
+          path: |
+            build/iDeck.ipa
+            build/iDeck-SideStore.ipa
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -86,7 +110,76 @@ jobs:
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/iDeck.ipa --title "iDeck $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" build/iDeck.ipa build/iDeck-SideStore.ipa --title "iDeck $GITHUB_REF_NAME" --generate-notes
+
+  publish:
+    name: Release the build and update the SideStore/AltStore feed
+    needs: sideload
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && inputs.bundle_id == 'com.ideck.app' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # One feed update at a time; each one starts from the published feed.
+    concurrency:
+      group: ios-feed
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ios-build-${{ github.run_number }}
+      FEED_TAG: ios-feed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: iDeck-sideload-ipa
+          path: ipa
+      - name: Release this build
+        run: |
+          set -euo pipefail
+          FEED="https://github.com/${GITHUB_REPOSITORY}/releases/download/${FEED_TAG}/source.json"
+          {
+            echo "Commit ${GITHUB_SHA::7}: $(git log -1 --format=%s "$GITHUB_SHA")"
+            echo
+            echo "- \`iDeck-SideStore.ipa\`: for SideStore or AltStore. It declares the app group that Vulkan uses. Updates arrive through the feed: $FEED"
+            echo "- \`iDeck.ipa\`: unsigned, for Sideloadly."
+          } > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ipa/iDeck-SideStore.ipa ipa/iDeck.ipa --clobber
+          else
+            gh release create "$TAG" ipa/iDeck-SideStore.ipa ipa/iDeck.ipa --prerelease --target "$GITHUB_SHA" \
+              --title "iDeck build ${{ github.run_number }} ($APP_VERSION)" --notes-file notes.md
+          fi
+      - name: Update the feed
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download"
+          if ! gh release view "$FEED_TAG" >/dev/null 2>&1; then
+            {
+              echo "The SideStore / AltStore source for iDeck. In SideStore: Sources › + › paste"
+              echo
+              echo "    $BASE/$FEED_TAG/source.json"
+              echo
+              echo "or open \`sidestore://source?url=$BASE/$FEED_TAG/source.json\` on the iPad."
+              echo "The iOS workflow replaces \`source.json\` after every published build."
+            } > feed-notes.md
+            gh release create "$FEED_TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "iDeck update feed (SideStore / AltStore)" --notes-file feed-notes.md
+          fi
+          mkdir -p prev feed
+          gh release download "$FEED_TAG" -p source.json -D prev || echo "no feed published yet"
+          cp ios/iDeck/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png feed/icon.png
+          python3 tools/make_altsource.py --ipa ipa/iDeck-SideStore.ipa \
+            --download-url "$BASE/$TAG/iDeck-SideStore.ipa" \
+            --source-url "$BASE/$FEED_TAG/source.json" --icon-url "$BASE/$FEED_TAG/icon.png" \
+            --website "https://github.com/${GITHUB_REPOSITORY}" --previous prev/source.json \
+            --notes "Build ${{ github.run_number }}: $(git log -1 --format=%s "$GITHUB_SHA")" --out feed/source.json
+          gh release upload "$FEED_TAG" feed/source.json feed/icon.png --clobber
+      - name: Check the published feed and IPA (downloaded the way SideStore does)
+        run: |
+          for i in 1 2 3; do
+            python3 tools/make_altsource.py --expect-version "$APP_VERSION" --verify-url \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/${FEED_TAG}/source.json" && exit 0
+            sleep 15
+          done
+          exit 1
 
   testflight:
     if: github.event_name == 'workflow_dispatch' && (inputs.edition == 'testflight' || inputs.edition == 'both')
@@ -128,7 +221,7 @@ jobs:
           xcodebuild -project ios/iDeck.xcodeproj -scheme iDeckTF -configuration Release -sdk iphoneos \
             -destination 'generic/platform=iOS' -archivePath build/iDeckTF.xcarchive archive \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic IDECK_BUNDLE_ID="$BUNDLE_ID" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" MARKETING_VERSION="$APP_VERSION" \
             IDECK_MANIFEST_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/runtime-latest/manifest.json" \
             "${AUTH[@]}"
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST

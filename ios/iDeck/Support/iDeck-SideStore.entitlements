@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded (ad-hoc, with ldid) in iDeck-SideStore.ipa, the IPA of the update
+     feed. SideStore and AltStore read the entitlements from the executable to
+     decide which capabilities to request for your Apple ID, then re-sign with
+     their own profile:
+       - application-groups: free accounts get it. The stores rename the group
+         to "<group>.<team ID>"; that must stay within 28 characters, the
+         budget for shared-memory names ("<group>/<suffix>", PSHMNAMLEN 31)
+         that virglrenderer uses for Venus blob memory. "group.ideck" becomes
+         22 characters; "group.com.ideck.app" would become 30 and fail.
+       - increased-memory-limit, extended-virtual-addressing: paid accounts
+         only. SideStore drops them for free accounts.
+       - get-task-allow: development profiles always carry it; JIT needs it.
+     The plain iDeck.ipa (for Sideloadly) stays unsigned. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.ideck</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>

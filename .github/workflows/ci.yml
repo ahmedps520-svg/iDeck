@@ -117,6 +117,8 @@ jobs:
             guest/rootfs/usr/lib/ideck/zram-swap guest/rootfs/usr/lib/ideck/steam-ui-daemon
       - name: Python syntax
         run: python3 -m py_compile guest/rootfs/usr/lib/ideck/*.py tools/*.py linux/*.py
+      - name: Tool tests (SideStore/AltStore feed)
+        run: python3 -m unittest discover -s tools/tests -v
       - name: systemd units
         run: |
           bash tools/ci_apt.sh systemd
