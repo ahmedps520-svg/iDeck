@@ -19,9 +19,18 @@ IDECK_STEAM_CEF_NOGPU=0
 IDECK_MANGOHUD=0
 IDECK_STEAM_LIGHT=1
 IDECK_STEAM_SMALL=0
+IDECK_STEAM_PIN=0
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
     . /var/lib/ideck/steam.env
+fi
+
+# Steam's steamwebhelper.sh pins Steam's UI to CPUs 2-6 (taskset 0x7c), the
+# big cores of Valve's Steam Frame: 2 of 4 vCPUs here. The taskset in
+# steam-path starts the web helper on every vCPU instead. IDECK_STEAM_PIN=1
+# keeps Steam's pinning (A/B tests only).
+if [ "$IDECK_STEAM_PIN" != 1 ]; then
+    export PATH="/usr/lib/ideck/steam-path:$PATH"
 fi
 
 # Wait for the X server (started by ideck-session.service).

@@ -80,7 +80,7 @@ echo "==> installing iDeck files"
 cp -a "$HERE/guest/rootfs/." "$ROOT/"
 install -m 0755 "$AGENT" "$ROOT/usr/lib/ideck/ideck-agent"
 install -m 0755 "$BENCH" "$ROOT/usr/lib/ideck/ideck-bench"
-chmod 0755 "$ROOT"/usr/lib/ideck/{ideck-steam-launch,ideck-steam-url,session,set-resolution,init-home,zram-swap} \
+chmod 0755 "$ROOT"/usr/lib/ideck/{ideck-steam-launch,ideck-steam-url,session,set-resolution,init-home,zram-swap,steam-ui-daemon,steam-path/taskset} \
            "$ROOT"/usr/lib/ideck/*.py
 echo "$VERSION" > "$ROOT/usr/lib/ideck/runtime-version"
 python3 "$HERE/linux/fex_components.py" "$ROOT/usr/lib/ideck/components.json"

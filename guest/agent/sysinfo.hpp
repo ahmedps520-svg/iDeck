@@ -56,4 +56,21 @@ std::string trimmed(std::string s);
 ideck::Json static_info();
 ideck::Json dynamic_status(const std::vector<CpuTimes>& prev, std::vector<CpuTimes>& now);
 
+struct ProcStat {
+    std::string comm;
+    uint64_t ticks = 0;      // utime + stime, in clock ticks
+    int nice = 0;
+    int threads = 0;
+    uint64_t rss_pages = 0;
+};
+// Parses one /proc/<pid>/stat line. The command name may contain spaces and
+// parentheses, so it is the text between the first '(' and the last ')'.
+bool parse_proc_stat(const std::string& stat, ProcStat& out);
+// The value of "Key:\tvalue" in /proc/<pid>/status text; "" if absent.
+std::string status_value(const std::string& status, const std::string& key);
+// Processes by CPU use over `interval_ms` (percent of one vCPU), each with
+// its nice value, thread count, resident size and allowed CPUs, plus totals
+// per command name. Blocks for the interval.
+ideck::Json top_processes(int interval_ms, size_t limit);
+
 }  // namespace agent

@@ -1,0 +1,14 @@
+#!/bin/sh
+# taskset as the Steam client sees it (ideck-steam-launch puts this directory
+# first in Steam's PATH). Steam's steamrtarm64/steamwebhelper.sh runs
+#   exec taskset 0x7c .../steamwebhelper ARGS
+# which pins Steam's whole UI (Chromium) to CPUs 2-6, the big cores of
+# Valve's Steam Frame. In the VM that is 2 of 4 vCPUs, 4 of 6, and no CPU at
+# all with 2 vCPUs (taskset then fails and the UI never starts). The web
+# helper is therefore started without a CPU mask; any other call goes to
+# util-linux taskset unchanged.
+if [ "$#" -ge 2 ] && [ "${2##*/}" = steamwebhelper ]; then
+    shift
+    exec "$@"
+fi
+exec /usr/bin/taskset "$@"

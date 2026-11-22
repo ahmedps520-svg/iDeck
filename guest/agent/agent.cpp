@@ -192,6 +192,15 @@ Reply execute_slow(const Job& job) {
         rep.result = std::move(r);
         return rep;
     }
+    if (job.op == "top") {
+        // Per-process CPU over an interval, with the CPUs each may run on.
+        int interval = static_cast<int>(a["interval_ms"].as_int(3000));
+        int limit = static_cast<int>(a["limit"].as_int(15));
+        interval = interval < 200 ? 200 : (interval > 10000 ? 10000 : interval);
+        limit = limit < 1 ? 1 : (limit > 100 ? 100 : limit);
+        rep.result = agent::top_processes(interval, static_cast<size_t>(limit));
+        return rep;
+    }
     if (job.op == "steam.package") {
         // Read-only view of the client updater's state in Steam/package/:
         // every entry with its size, plus the text of small files that are
@@ -233,6 +242,8 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_MANGOHUD=") + (a["overlay"].as_bool(false) ? "1" : "0") + "\n";
         env += std::string("IDECK_STEAM_LIGHT=") + (a["lightweight"].as_bool(true) ? "1" : "0") + "\n";
         env += std::string("IDECK_STEAM_SMALL=") + (a["small_mode"].as_bool(false) ? "1" : "0") + "\n";
+        // Keep Steam's own CPU pinning of steamwebhelper (only for A/B tests).
+        env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
         // disk survives runtime updates (system disk replacement).
         const std::string paths[] = {std::string(kStateDir) + "/steam.env", "/home/.ideck/steam.env"};

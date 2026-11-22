@@ -176,6 +176,50 @@ def steam_updater_summary(journal: str) -> dict:
     }
 
 
+JIT_KEYS = {
+    "TB count": "tb_count",
+    "TB flush count": "tb_flush",
+    "TB invalidate count": "tb_invalidate",
+    "TLB full flushes": "tlb_full_flushes",
+    "TLB partial flushes": "tlb_partial_flushes",
+}
+
+
+def parse_jit_info(text: str) -> dict:
+    """Numbers from QEMU's `info jit` (QMP x-query-jit): how full the TCG
+    code buffer is, how many translation blocks exist, and how often the
+    whole buffer was flushed (every flush stops all vCPUs and retranslates)."""
+    out: dict = {}
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if ln.startswith("gen code size") and "/" in ln:
+            used, total = ln[len("gen code size"):].strip().split("/", 1)
+            try:
+                out["gen_code_bytes"], out["code_buffer_bytes"] = int(used), int(total.split()[0])
+            except ValueError:
+                pass
+            continue
+        for key, name in JIT_KEYS.items():
+            if ln.startswith(key + " "):
+                val = ln[len(key):].strip().split()
+                if val and val[0].isdigit():
+                    out[name] = int(val[0])
+    return out
+
+
+def top_summary(top: dict) -> dict:
+    """The agent's `top` reply cut down to what matters for Steam's UI."""
+    procs = top.get("processes", []) or []
+    helpers = [p for p in procs if str(p.get("comm", "")).startswith("steamwebhelper")]
+    return {
+        "cpu_percent": top.get("cpu_percent"),
+        "online_cpus": top.get("online_cpus"),
+        "by_command": (top.get("by_command") or [])[:6],
+        "webhelper_cpus_allowed": sorted({str(p.get("cpus")) for p in helpers}),
+        "webhelper_processes_listed": len(helpers),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--core", required=True, help="path to libideck_core shared library")
@@ -202,6 +246,10 @@ def main() -> int:
                     help="drop this word from the kernel command line (repeatable)")
     ap.add_argument("--cmdline-add", action="append", default=[],
                     help="append this word to the kernel command line (repeatable)")
+    ap.add_argument("--tb-cache-mb", type=int, default=512,
+                    help="TCG translation cache (tb-size); the iPad uses 384 for a 4 GiB guest")
+    ap.add_argument("--steam-pin-ab", action="store_true",
+                    help="restart Steam with and without Steam's CPU pinning of steamwebhelper and time its window")
     a = ap.parse_args()
     if a.bench_only:
         a.cmdline_add.append("ideck.noprovision")
@@ -228,7 +276,7 @@ def main() -> int:
     cfg = {
         "profile": "desktop-test", "kernel": str(a.runtime / "Image"), "initrd": str(a.runtime / "initrd.img"),
         "system_disk": str(system), "data_disk": str(data), "guest_mb": a.memory, "cpus": a.cpus,
-        "tb_cache_mb": 512, "cpu_model": a.cpu_model, "gl": False, "vulkan": False,
+        "tb_cache_mb": a.tb_cache_mb, "cpu_model": a.cpu_model, "gl": False, "vulkan": False,
         "qmp_socket": str(run / "q.sock"), "control_socket": str(run / "c.sock"),
         "input_socket": str(run / "i.sock"), "console_log": str(a.report / "console.log"), "audio": "none",
     }
@@ -381,7 +429,31 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 return 0
 
+        def jit(label: str) -> dict:
+            try:
+                text = (qmp.run("x-query-jit") or {}).get("human-readable-text", "")
+                (a.report / f"jit-{label}.txt").write_text(text)
+                stats = parse_jit_info(text)
+            except Exception as e:  # noqa: BLE001
+                stats = {"error": str(e)}
+            report.setdefault("jit", {})[label] = stats
+            log(f"jit-{label}", stats)
+            return stats
+
+        def top(label: str) -> dict:
+            try:
+                t = agent.request("top", {"interval_ms": 5000, "limit": 40}, timeout=60)
+                (a.report / f"top-{label}.json").write_text(json.dumps(t, indent=2))
+                s = top_summary(t)
+            except Exception as e:  # noqa: BLE001
+                s = {"error": str(e)}
+            report.setdefault("top", {})[label] = s
+            log(f"top-{label}", s)
+            return s
+
+        jit("steam-window")
         if window_seen_at is not None:
+            top("steam-visible")
             ui: dict = {}
             try:
                 ui["visible_cpu"] = cpu_average(60)
@@ -399,6 +471,49 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001
                 log("steam-ui", f"{e} ({ui})", ok=False)
             report["steam_ui"] = ui
+            jit("after-ui")
+
+        # Steam's steamwebhelper.sh pins its UI to CPUs 2-6 (2 of 4 vCPUs).
+        # Restart Steam with that pinning kept, then with iDeck's override,
+        # and time each until the sign-in window is drawn again (a blank
+        # screen is ~4 KB as PNG, the sign-in window ~34 KB).
+        if a.steam_pin_ab and window_seen_at is not None:
+            def restart_timing(label: str, pin: bool) -> dict:
+                res: dict = {"pin_webhelper": pin}
+                try:
+                    agent.request("steam.configure", {"lightweight": True, "cef_software": a.steam_software_ui,
+                                                      "pin_webhelper": pin})
+                    t_start = time.time()
+                    agent.request("steam.restart", timeout=120)
+                    # Wait for the old window to go, then for the new one.
+                    blank_at = None
+                    while time.time() - t_start < 120:
+                        if screenshot(f"screen-pin-{label}") < 10000:
+                            blank_at = time.time()
+                            break
+                        agent.wait_event("__none__", 3)
+                    res["stopped_s"] = round(blank_at - t_start, 1) if blank_at else None
+                    window_at = None
+                    while blank_at and time.time() - t_start < 900:
+                        if screenshot(f"screen-pin-{label}") > 25000:
+                            window_at = time.time()
+                            break
+                        agent.wait_event("__none__", 5)
+                    res["window_s"] = round(window_at - t_start, 1) if window_at else None
+                    if window_at:
+                        agent.wait_event("__none__", 20)
+                        res["top"] = top(f"pin-{label}")
+                        res["cpu_60s"] = cpu_average(60)
+                except Exception as e:  # noqa: BLE001
+                    res["error"] = str(e)
+                log(f"steam-pin-{label}", res, ok=res.get("window_s") is not None)
+                return res
+
+            report["pin_ab"] = {
+                "pinned": restart_timing("pinned", True),
+                "unpinned": restart_timing("unpinned", False),
+            }
+            jit("after-pin-ab")
 
         # A Steam restart (the next iDeck launch) must not install the
         # client again: with the bootstrap's package/*.manifest the updater

@@ -51,6 +51,28 @@ TEST("agent: cpu usage between samples") {
     CHECK_EQ(u[1], 0.0);
 }
 
+TEST("agent: /proc/<pid>/stat and status parsing") {
+    ProcStat st;
+    // A command name with spaces and parentheses (fields after it as in Linux 6.12).
+    CHECK(parse_proc_stat(
+        "1234 (Web Content (x)) S 1 1234 1234 0 -1 4194560 5000 0 12 0 750 250 0 0 20 5 31 0 900 "
+        "123456789 2048 18446744073709551615 1 1 0 0 0 0 0 4096 0 0 0 0 17 2 0 0 0 0 0",
+        st));
+    CHECK_EQ(st.comm, std::string("Web Content (x)"));
+    CHECK_EQ(st.ticks, 1000u);
+    CHECK_EQ(st.nice, 5);
+    CHECK_EQ(st.threads, 31);
+    CHECK_EQ(st.rss_pages, 2048u);
+    CHECK(!parse_proc_stat("1234 (truncated) S 1 2", st));
+    CHECK(!parse_proc_stat("garbage", st));
+
+    std::string status = "Name:\tsteamwebhelper\nCpus_allowed:\t0c\nCpus_allowed_list:\t2-3\nThreads:\t40\n";
+    CHECK_EQ(status_value(status, "Cpus_allowed_list"), std::string("2-3"));
+    CHECK_EQ(status_value(status, "Cpus_allowed"), std::string("0c"));
+    CHECK_EQ(status_value(status, "Name"), std::string("steamwebhelper"));
+    CHECK(status_value(status, "Missing").empty());
+}
+
 #if defined(__linux__)
 #include <linux/input.h>
 TEST("agent: gamepad state maps to evdev events") {

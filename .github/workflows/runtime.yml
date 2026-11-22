@@ -17,7 +17,11 @@ on:
         type: boolean
         default: false
       steam_software_ui:
-        description: Boot test only - start Steam with its software-rendered UI and watch it for 30 more minutes
+        description: Boot test only - start Steam with its software-rendered UI (the app's default)
+        type: boolean
+        default: false
+      kernel_ab:
+        description: Also run the kernel/CPU-model benchmark A/B boots (~15 min)
         type: boolean
         default: false
       boot_test:
@@ -61,7 +65,7 @@ jobs:
           sudo chown -R "$USER" out
           ls -la out
       - name: Kernel and CPU model benchmark (A/B boots without provisioning)
-        if: github.event_name == 'push' || inputs.boot_test
+        if: inputs.kernel_ab
         continue-on-error: true
         timeout-minutes: 45
         run: |
@@ -94,8 +98,14 @@ jobs:
         run: |
           # Watch 5 more minutes after Steam's window appears: its first update
           # check (about 2 min after start) shows whether it installs again.
-          EXTRA="--steam-observe 300 --steam-apply-update"
-          if [ "${{ inputs.steam_software_ui }}" = "true" ]; then EXTRA="--steam-software-ui --steam-observe 1800"; fi
+          # The 384 MiB TCG cache is what a 4 GiB guest gets on the iPad; the
+          # pin A/B restarts Steam with and without Steam's own CPU pinning.
+          EXTRA="--steam-observe 300 --tb-cache-mb 384 --steam-pin-ab"
+          if [ "${{ inputs.steam_software_ui }}" = "true" ]; then
+            EXTRA="$EXTRA --steam-software-ui"
+          else
+            EXTRA="$EXTRA --steam-apply-update"
+          fi
           # shellcheck disable=SC2086
           python3 tools/ideck_host.py --core build/core/libideck_core.so --runtime out \
             --report out/boot-test --memory 4096 --cpus 4 $EXTRA
