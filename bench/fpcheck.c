@@ -45,8 +45,10 @@ _Static_assert(FPCHECK_GPR == 9, "the wrapper passes the general register in x9"
 
 /*
  * fpcheck_run(state*, code): load every V register, x9, NZCV and FPCR from
- * the state, clear FPSR, call the code, and store everything back.  x19
- * holds the state while the code runs (the glue instructions use it).
+ * the state, clear FPSR, call the code, and store everything back.  While
+ * the code runs, x19 and x10 point to the state (the glue instructions
+ * load and store through them; x10 may be advanced by post-indexed loads,
+ * which is why the state sits in a page of fixed contents) and x11 is 3.
  */
 void fpcheck_run(state* st, const void* code);
 __asm__(
@@ -83,6 +85,8 @@ __asm__(
     "    ldp q28, q29, [x19, #448]\n"
     "    ldp q30, q31, [x19, #480]\n"
     "    ldr x9, [x19, #536]\n"
+    "    mov x10, x19\n"
+    "    mov x11, #3\n"
     "    ldr x2, [x19, #512]\n"
     "    msr fpcr, x2\n"
     "    msr fpsr, xzr\n"
@@ -130,42 +134,110 @@ __asm__(
     ".balign 4\n"
     ".globl fpcheck_glue\n"
     "fpcheck_glue:\n"
-    "    fmov d1, d0\n"
     "    fmov s26, s25\n"
-    "    fabs d2, d1\n"
-    "    fneg s3, s2\n"
     "    fneg d27, d16\n"
+    "    fabs v6.2d, v7.2d\n"
+    "    fneg v2.4s, v3.4s\n"
     "    mov v4.16b, v3.16b\n"
     "    mov v28.16b, v0.16b\n"
     "    mov v7.16b, v30.16b\n"
+    "    mov v1.16b, v2.16b\n"
     "    add v5.2d, v4.2d, v0.2d\n"
     "    sub v29.4s, v25.4s, v13.4s\n"
+    "    mul v1.4s, v2.4s, v0.4s\n"
     "    eor v6.16b, v5.16b, v1.16b\n"
     "    and v10.16b, v26.16b, v27.16b\n"
-    "    fmov x9, d6\n"
-    "    fmov w9, s31\n"
-    "    fmov d7, x9\n"
-    "    fmov s30, w9\n"
-    "    mov v0.d[1], v7.d[0]\n"
-    "    mov v16.s[2], v4.s[1]\n"
-    "    dup v1.4s, w9\n"
-    "    dup v31.2d, x9\n"
-    "    umov w9, v2.s[1]\n"
-    "    mov x9, v27.d[1]\n"
-    "    ldr d3, [x19, #8]\n"
-    "    ldr q12, [x19, #400]\n"
-    "    str q4, [x19, #32]\n"
-    "    str d25, [x19, #488]\n"
-    "    fcsel d5, d0, d1, ne\n"
-    "    fcsel s14, s26, s7, ge\n"
-    "    movi v6.16b, #0x55\n"
-    "    fmov d2, #1.5\n"
-    "    fmov s15, #-0.25\n"
+    "    orr v0.16b, v1.16b, v2.16b\n"
+    "    not v3.16b, v4.16b\n"
+    "    bsl v0.16b, v1.16b, v2.16b\n"
+    "    bit v3.16b, v4.16b, v5.16b\n"
+    "    cmeq v0.4s, v1.4s, v2.4s\n"
+    "    ushr v3.2d, v4.2d, #7\n"
+    "    sshr d5, d6, #3\n"
+    "    shl v11.2d, v4.2d, #3\n"
+    "    xtn v4.4h, v5.4s\n"
+    "    uxtl v6.2d, v7.2s\n"
+    "    rev64 v1.16b, v2.16b\n"
     "    ext v8.16b, v0.16b, v25.16b, #5\n"
     "    zip1 v9.4s, v1.4s, v30.4s\n"
-    "    shl v11.2d, v4.2d, #3\n"
+    "    uzp2 v2.8h, v3.8h, v0.8h\n"
+    "    movi v6.16b, #0x55\n"
+    "    movi d5, #0xff00ff00ff00ff00\n"
+    "    mvni v3.4s, #0x12\n"
+    "    fmov d2, #1.5\n"
+    "    fmov s15, #-0.25\n"
+    "    fmov d0, #-2.0\n"
+    "    fcsel d5, d0, d1, ne\n"
+    "    fcsel s14, s26, s7, ge\n"
+    "    fcsel d1, d2, d3, mi\n"
+    "    fcvt h3, d4\n"
+    "    fcvt d5, h3\n"
+    "    fcvt s2, h1\n"
+    "    sqadd v1.4s, v2.4s, v3.4s\n"
+    "    uqsub v4.8b, v5.8b, v6.8b\n"
+    "    cnt v0.8b, v1.8b\n"
+    "    addv s2, v3.4s\n"
+    "    umaxv b4, v5.16b\n"
+    "    sqrdmulh v0.4s, v1.4s, v2.4s\n"
+    "    uaddlv h3, v4.16b\n"
+    "    fmov x9, d6\n"
+    "    fmov w9, s31\n"
+    "    fmov x9, d1\n"
+    "    fmov d7, x9\n"
+    "    fmov s30, w9\n"
+    "    fmov d0, x9\n"
+    "    fmov v2.d[1], x9\n"
+    "    fmov x9, v3.d[1]\n"
+    "    mov v0.d[1], v7.d[0]\n"
+    "    mov v16.s[2], v4.s[1]\n"
+    "    mov v3.d[0], x9\n"
+    "    dup v1.4s, w9\n"
+    "    dup v31.2d, x9\n"
+    "    dup v5.2d, v0.d[1]\n"
+    "    umov w9, v2.s[1]\n"
+    "    mov x9, v27.d[1]\n"
+    "    mov x9, v0.d[0]\n"
+    "    ldr d3, [x19, #8]\n"
+    "    ldr s7, [x19, #100]\n"
+    "    ldr q12, [x19, #400]\n"
+    "    ldr q0, [x19, #16]\n"
+    "    ldr d1, [x19, #24]\n"
+    "    ldr d2, [x19, x11, lsl #3]\n"
+    "    ldr s4, [x19, x11]\n"
+    "    ldur d6, [x19, #9]\n"
+    "    ldur q1, [x19, #33]\n"
+    "    ldur s0, [x19, #3]\n"
+    "    ldr d4, [x10], #16\n"
+    "    ldr q5, [x10, #32]!\n"
+    "    ldr s2, [x10], #8\n"
+    "    ldr d0, [x10, #8]!\n"
+    "    ldp d1, d2, [x19, #48]\n"
+    "    ldp q3, q0, [x19, #64]\n"
+    "    ldp s4, s5, [x19, #16]\n"
+    "    ldnp d2, d3, [x19, #128]\n"
+    "    ldp d5, d0, [x10], #16\n"
+    "    ldp q1, q4, [x10, #32]!\n"
+    "    ld1 {v4.16b, v5.16b}, [x19]\n"
+    "    ld1 {v0.2d}, [x19]\n"
+    "    ld1r {v1.4s}, [x19]\n"
+    "    ld2 {v2.4s, v3.4s}, [x19]\n"
+    "    ld1 {v6.d}[1], [x19]\n"
+    "    ld1 {v0.16b, v1.16b, v2.16b}, [x10], #48\n"
+    "    str q4, [x19, #32]\n"
+    "    str d25, [x19, #488]\n"
+    "    str s1, [x19, #500]\n"
+    "    stur d2, [x19, #33]\n"
+    "    stp d0, d1, [x19, #440]\n"
+    "    stp q2, q3, [x19, #448]\n"
+    "    st1 {v0.16b}, [x19]\n"
+    "    ldr x9, [x19, #536]\n"
+    "    str x9, [x19, #536]\n"
+    "    ldr w9, [x19, #4]\n"
+    "    ldrb w9, [x10], #1\n"
     "    adds x9, x9, x9\n"
     "    cmn x9, #1\n"
+    "    cmp x9, #0\n"
+    "    ccmp x9, x11, #4, ne\n"
     ".globl fpcheck_glue_end\n"
     "fpcheck_glue_end:\n"
     ".text\n");
@@ -307,6 +379,12 @@ static uint64_t hash_flags(uint64_t h, const state* st) {
 
 /* ---- running generated code ------------------------------------------------ */
 
+/* The state, in a page whose other bytes never change (see fpcheck_run). */
+static union {
+    state st;
+    uint8_t page[4096];
+} g_buf __attribute__((aligned(64)));
+
 static uint32_t* g_code;
 static sigjmp_buf g_jmp;
 static volatile sig_atomic_t g_armed;
@@ -403,7 +481,9 @@ int main(int argc, char** argv) {
     static unsigned char pat_ran[FPCHECK_NPATTERNS];
     for (int i = 0; i < FPCHECK_NPATTERNS; ++i) pat_values[i] = pat_flags[i] = FNV_INIT;
 
-    state st;
+    for (size_t i = sizeof(state); i < sizeof(g_buf.page); ++i)
+        g_buf.page[i] = (uint8_t)(i * 131u + (i >> 8) * 29u + 7u);
+#define st (g_buf.st)
     uint64_t runs = 0;
     double t0 = now_s();
 
@@ -450,28 +530,33 @@ int main(int argc, char** argv) {
      */
     uint64_t mix_values = FNV_INIT, mix_flags = FNV_INIT, mix_runs = 0, mix_sigill = 0;
     const int nglue = (int)(fpcheck_glue_end - fpcheck_glue);
-    const int nseq = quick ? 300 : 4000;
+    const int nseq = quick ? 1500 : 30000;
     double t1 = now_s();
     for (int q = 0; q < nseq; ++q) {
-        uint32_t seq[16];
+        uint32_t seq[40];
         int len = 0;
         uint64_t pr = (uint64_t)q * 0x2545f4914f6cdd1dull + 99;
-        for (int k = 0; k < 12; ++k) {
+        /* Even sequences: any register. Odd: listed instructions among
+           V0-V6 only, and more of them, so they feed each other. */
+        const int dense = q & 1;
+        const int want = 6 + (int)((unsigned)q % 27u);
+        for (int k = 0; k < 4 * want && len < want; ++k) {
             pr ^= pr << 13;
             pr ^= pr >> 7;
             pr ^= pr << 17;
-            if ((pr & 0xff) < 150) {
+            if ((pr & 0xff) < (dense ? 205u : 150u)) {
                 int c = (int)((pr >> 8) % FPCHECK_NCASES);
                 unsigned pat = fpcheck_cases[c].pat;
                 if (!have_feat(fpcheck_feat[pat]) || pat_sigill[pat]) continue;
+                if (dense && !fpcheck_cases[c].low) continue;
                 seq[len++] = fpcheck_cases[c].insn;
             } else {
                 seq[len++] = fpcheck_glue[(pr >> 8) % (uint64_t)nglue];
             }
         }
-        for (int s = 0; s < 3; ++s) {
-            fill_state(&st, 777u + (uint64_t)q * 31u + (uint64_t)s, fpcr_modes[(q + s) % nmodes]);
-            int ill = s == 0 ? run_code(&st, seq, len) : rerun(&st);
+        for (int s2 = 0; s2 < 3; ++s2) {
+            fill_state(&st, 777u + (uint64_t)q * 31u + (uint64_t)s2, fpcr_modes[(q + s2) % nmodes]);
+            int ill = s2 == 0 ? run_code(&st, seq, len) : rerun(&st);
             if (ill) {
                 ++mix_sigill;
                 break;
@@ -518,7 +603,8 @@ int main(int argc, char** argv) {
     }
     printf("\n  }\n}\n");
     (void)nskip;
-    return nill ? 1 : 0;
+    return nill || mix_sigill ? 1 : 0;
+#undef st
 }
 
 #else

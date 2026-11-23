@@ -41,6 +41,7 @@ HV_VEC_SD = 1 << 9  # Q=0 with sz=1 is unallocated
 HV_Q1 = 1 << 10     # only allocated with Q=1
 HV_NO_AH = 1 << 11  # result depends on FEAT_RPRES when FPCR.AH=1
 HV_TBL = 1 << 12    # table registers Rn .. Rn+len
+HV_IN_LO = 1 << 13  # every V input is read as a scalar (low 64 bits at most)
 HV_FEAT_SHIFT = 16
 
 FEATS = ["NONE", "JSCVT", "AES", "SHA1", "SHA256", "PMULL"]
@@ -57,6 +58,7 @@ class Pattern:
     q1: bool = False
     no_ah: bool = False
     tbl: bool = False
+    in_lo: bool = False
     feat: str = "NONE"
 
     @property
@@ -100,6 +102,8 @@ class Pattern:
             f |= HV_NO_AH
         if self.tbl:
             f |= HV_TBL
+        if self.in_lo:
+            f |= HV_IN_LO
         return f | (FEATS.index(self.feat) << HV_FEAT_SHIFT)
 
     def check(self) -> None:
@@ -139,19 +143,19 @@ class Pattern:
 
 
 def _scalar2(name: str, op: str) -> Pattern:
-    return Pattern(name, f"00011110 0.1 mmmmm {op} 10 nnnnn ddddd", scalar=True)
+    return Pattern(name, f"00011110 0.1 mmmmm {op} 10 nnnnn ddddd", scalar=True, in_lo=True)
 
 
 def _scalar1(name: str, op: str, **kw) -> Pattern:
-    return Pattern(name, f"00011110 0.1 {op} 10000 nnnnn ddddd", scalar=True, **kw)
+    return Pattern(name, f"00011110 0.1 {op} 10000 nnnnn ddddd", scalar=True, in_lo=True, **kw)
 
 
 def _s3same(name: str, u: str, hi: str, op: str) -> Pattern:
-    return Pattern(name, f"01{u}11110 {hi}.1 mmmmm {op} 1 nnnnn ddddd", scalar=True)
+    return Pattern(name, f"01{u}11110 {hi}.1 mmmmm {op} 1 nnnnn ddddd", scalar=True, in_lo=True)
 
 
 def _s2misc(name: str, u: str, hi: str, r: str, op: str, **kw) -> Pattern:
-    return Pattern(name, f"01{u}11110 {hi}.1 {r} {op} 0 nnnnn ddddd", scalar=True, **kw)
+    return Pattern(name, f"01{u}11110 {hi}.1 {r} {op} 0 nnnnn ddddd", scalar=True, in_lo=True, **kw)
 
 
 def _v3same(name: str, u: str, hi: str, op: str, **kw) -> Pattern:
@@ -171,18 +175,19 @@ def _build() -> list[Pattern]:
                      ("FSUB", "0011"), ("FMAX", "0100"), ("FMIN", "0101"),
                      ("FMAXNM", "0110"), ("FMINNM", "0111"), ("FNMUL", "1000")]:
         p.append(_scalar2(name + "_s", op))
-    for name, op in [("FSQRT", "000011"), ("FRINTN", "001000"), ("FRINTP", "001001"),
+    for name, op in [("FMOV", "000000"), ("FABS", "000001"), ("FNEG", "000010"),
+                     ("FSQRT", "000011"), ("FRINTN", "001000"), ("FRINTP", "001001"),
                      ("FRINTM", "001010"), ("FRINTZ", "001011"), ("FRINTA", "001100"),
                      ("FRINTX", "001110"), ("FRINTI", "001111")]:
         p.append(_scalar1(name + "_s", op))
-    p.append(Pattern("FCVT_s_ds", "00011110 001 000101 10000 nnnnn ddddd", scalar=True))
-    p.append(Pattern("FCVT_s_sd", "00011110 011 000100 10000 nnnnn ddddd", scalar=True))
+    p.append(Pattern("FCVT_s_ds", "00011110 001 000101 10000 nnnnn ddddd", scalar=True, in_lo=True))
+    p.append(Pattern("FCVT_s_sd", "00011110 011 000100 10000 nnnnn ddddd", scalar=True, in_lo=True))
     # FMADD, FMSUB, FNMADD, FNMSUB
-    p.append(Pattern("FMADD_all", "00011111 0.. mmmmm . aaaaa nnnnn ddddd", scalar=True))
+    p.append(Pattern("FMADD_all", "00011111 0.. mmmmm . aaaaa nnnnn ddddd", scalar=True, in_lo=True))
     # FCMP / FCMPE with a register, with zero; FCCMP / FCCMPE
-    p.append(Pattern("FCMP", "00011110 0.1 mmmmm 001000 nnnnn .0000", kind=FLAGS_OUT))
-    p.append(Pattern("FCMP_z", "00011110 0.1 00000 001000 nnnnn .1000", kind=FLAGS_OUT))
-    p.append(Pattern("FCCMP", "00011110 0.1 mmmmm .... 01 nnnnn .....", kind=FLAGS_INOUT))
+    p.append(Pattern("FCMP", "00011110 0.1 mmmmm 001000 nnnnn .0000", kind=FLAGS_OUT, in_lo=True))
+    p.append(Pattern("FCMP_z", "00011110 0.1 00000 001000 nnnnn .1000", kind=FLAGS_OUT, in_lo=True))
+    p.append(Pattern("FCCMP", "00011110 0.1 mmmmm .... 01 nnnnn .....", kind=FLAGS_INOUT, in_lo=True))
 
     # --- AdvSIMD scalar ---------------------------------------------------
     p += [
@@ -223,7 +228,7 @@ def _build() -> list[Pattern]:
         _s2misc("FCVTAS_f", "0", "0", "00001", "11001"),
         _s2misc("FCVTAU_f", "1", "0", "00001", "11001"),
     ]
-    p.append(Pattern("FCVTXN_s", "01111110 011 00001 01101 0 nnnnn ddddd", scalar=True))
+    p.append(Pattern("FCVTXN_s", "01111110 011 00001 01101 0 nnnnn ddddd", scalar=True, in_lo=True))
     for name, u, op, rd_in in [("FMUL", "0", "1001", False), ("FMLA", "0", "0001", True),
                                ("FMLS", "0", "0101", True), ("FMULX", "1", "1001", False)]:
         p.append(Pattern(name + "_si_s", f"01{u}11111 10 . mmmmm {op} . 0 nnnnn ddddd",
@@ -233,9 +238,9 @@ def _build() -> list[Pattern]:
     for name, u, op in [("SCVTF", "0", "111001"), ("UCVTF", "1", "111001"),
                         ("FCVTZS", "0", "111111"), ("FCVTZU", "1", "111111")]:
         p.append(Pattern(name + "_fixed_s", f"01{u}11111 0 01..... {op} nnnnn ddddd",
-                         scalar=True))
+                         scalar=True, in_lo=True))
         p.append(Pattern(name + "_fixed_d", f"01{u}11111 0 1...... {op} nnnnn ddddd",
-                         scalar=True))
+                         scalar=True, in_lo=True))
 
     # --- AdvSIMD vector -----------------------------------------------------
     p += [
@@ -322,7 +327,8 @@ def _build() -> list[Pattern]:
                      ("FCVTPU", "101001"), ("FCVTMS", "110000"), ("FCVTMU", "110001"),
                      ("FCVTZS", "111000"), ("FCVTZU", "111001"), ("FCVTAS", "100100"),
                      ("FCVTAU", "100101")]:
-        p.append(Pattern(name + "_g", f". 0011110 0. {op} 000000 nnnnn DDDDD", kind=GPR_OUT))
+        p.append(Pattern(name + "_g", f". 0011110 0. {op} 000000 nnnnn DDDDD", kind=GPR_OUT,
+                         in_lo=True))
     # Fixed point: with a 32-bit general register the scale field is 1xxxxx.
     for name, op in [("SCVTF", "000010"), ("UCVTF", "000011")]:
         p.append(Pattern(name + "_gf32", f"0 0011110 0. {op} 1..... NNNNN ddddd",
@@ -331,11 +337,11 @@ def _build() -> list[Pattern]:
                          kind=GPR_IN, scalar=True))
     for name, op in [("FCVTZS", "011000"), ("FCVTZU", "011001")]:
         p.append(Pattern(name + "_gf32", f"0 0011110 0. {op} 1..... nnnnn DDDDD",
-                         kind=GPR_OUT))
+                         kind=GPR_OUT, in_lo=True))
         p.append(Pattern(name + "_gf64", f"1 0011110 0. {op} ...... nnnnn DDDDD",
-                         kind=GPR_OUT))
+                         kind=GPR_OUT, in_lo=True))
     p.append(Pattern("FJCVTZS", "0 0011110 01 111110 000000 nnnnn DDDDD",
-                     kind=GPR_OUT_FLAGS, feat="JSCVT"))
+                     kind=GPR_OUT_FLAGS, feat="JSCVT", in_lo=True))
 
     # --- Cryptography and table lookup -------------------------------------
     p.append(Pattern("AESE", "01001110 00 10100 00100 10 nnnnn ddddd", rd_in=True, feat="AES"))
@@ -416,18 +422,28 @@ REG_SETS = [
     (30, 29, 31, 30),
     (31, 25, 26, 27),
     (27, 31, 30, 29),
+    (0, 0, 1, 2),
+    (1, 2, 3, 0),
+    (2, 3, 0, 1),
+    (3, 1, 2, 3),
+    (5, 0, 4, 1),
+    (1, 5, 6, 2),
 ]
 TEST_GPR = 9  # general register used by the GPR kinds in test encodings
 
 
-def cases(seed: int = 20261123, per_regset: int = 2) -> list[tuple[int, int]]:
-    """(instruction, pattern index) pairs for fpcheck."""
+# REG_SETS from this index on use only a few low registers.
+LOW_REG_SETS = 10
+
+
+def cases(seed: int = 20261123, per_regset: int = 2) -> list[tuple[int, int, int]]:
+    """(instruction, pattern index, low-register flag) triples for fpcheck."""
     rng = random.Random(seed)
-    out: list[tuple[int, int]] = []
+    out: list[tuple[int, int, int]] = []
     seen: set[int] = set()
     for idx, pat in enumerate(PATTERNS):
         b = pat.clean
-        for rd, rn, rm, ra in REG_SETS:
+        for rs, (rd, rn, rm, ra) in enumerate(REG_SETS):
             for _ in range(per_regset):
                 for _attempt in range(64):
                     insn = pat.value | (rng.getrandbits(32) & ~pat.mask)
@@ -450,7 +466,7 @@ def cases(seed: int = 20261123, per_regset: int = 2) -> list[tuple[int, int]]:
                         put(ra, 10)
                     if pat.allocated(insn) and insn not in seen:
                         seen.add(insn)
-                        out.append((insn, idx))
+                        out.append((insn, idx, int(rs >= LOW_REG_SETS)))
                         break
     return out
 
@@ -481,10 +497,11 @@ def cases_c() -> str:
     out.append("static const char *const fpcheck_feats[] = {")
     out.append("    " + ", ".join(f'"{f}"' for f in FEATS))
     out.append("};")
-    out.append("static const struct { unsigned insn; unsigned short pat; }"
+    out.append("/* low: the instruction names only registers V0-V6 */")
+    out.append("static const struct { unsigned insn; unsigned short pat; unsigned char low; }"
                " fpcheck_cases[FPCHECK_NCASES] = {")
-    for insn, idx in cs:
-        out.append(f"    {{ 0x{insn:08x}, {idx} }},")
+    for insn, idx, low in cs:
+        out.append(f"    {{ 0x{insn:08x}, {idx}, {low} }},")
     out.append("};")
     return "\n".join(out) + "\n"
 

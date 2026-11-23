@@ -31,6 +31,9 @@ class PatternTable(unittest.TestCase):
             0x4E62CC20: "FMLA_v",       # fmla v0.2d, v1.2d, v2.2d
             0x6E22DC20: "FMUL_v",       # fmul v0.4s, v1.4s, v2.4s
             0x1E61C020: "FSQRT_s",      # fsqrt d0, d1
+            0x1E604020: "FMOV_s",       # fmov d0, d1
+            0x1E60C020: "FABS_s",       # fabs d0, d1
+            0x1E214020: "FNEG_s",       # fneg s0, s1
             0x1E22C020: "FCVT_s_ds",    # fcvt d0, s1
             0x1E624020: "FCVT_s_sd",    # fcvt s0, d1
             0x5E21D820: "SCVTF_f",      # scvtf s0, s1
@@ -49,8 +52,6 @@ class PatternTable(unittest.TestCase):
     def test_encodings_qemu_must_keep(self):
         for insn, what in {
             0x4EA28420: "add v0.4s, v1.4s, v2.4s (integer: TCG does it inline)",
-            0x1E604020: "fmov d0, d1",
-            0x1E60C020: "fabs d0, d1",
             0x1EE22820: "fadd h0, h1, h2 (half precision)",
             0x0E62D420: "fadd with Q=0, sz=1 (unallocated)",
             0x1E620C20: "fcsel d0, d1, d2, eq",
@@ -66,6 +67,10 @@ class PatternTable(unittest.TestCase):
         self.assertEqual(f & 7, spec.VEC)
         self.assertTrue(f & spec.HV_RD and f & spec.HV_RN and f & spec.HV_RM and f & spec.HV_SCALAR)
         self.assertFalse(f & spec.HV_RD_IN)
+        self.assertTrue(f & spec.HV_IN_LO)
+        self.assertFalse(by["FADD_v"].flags & spec.HV_IN_LO)
+        self.assertFalse(by["FADDP_s"].flags & spec.HV_IN_LO, "reads a two-element vector")
+        self.assertFalse(by["FMUL_si_d"].flags & spec.HV_IN_LO, "reads an element by index")
         self.assertTrue(by["FMLA_v"].flags & spec.HV_RD_IN)
         self.assertEqual(by["FCMP"].flags & 7, spec.FLAGS_OUT)
         self.assertFalse(by["FCMP"].flags & spec.HV_RD)
@@ -79,14 +84,17 @@ class PatternTable(unittest.TestCase):
         cases = spec.cases()
         self.assertGreater(len(cases), 3000)
         self.assertEqual(len({c[0] for c in cases}), len(cases))
-        for insn, idx in cases:
+        for insn, idx, low in cases:
             pat = spec.PATTERNS[idx]
             self.assertIs(spec.lookup(insn), pat, hex(insn))
             if pat.kind in (spec.GPR_OUT, spec.GPR_OUT_FLAGS):
                 self.assertEqual(insn & 31, spec.TEST_GPR)
             if pat.kind == spec.GPR_IN:
                 self.assertEqual((insn >> 5) & 31, spec.TEST_GPR)
-        self.assertEqual({idx for _, idx in cases}, set(range(len(spec.PATTERNS))))
+            if low:
+                self.assertLess(insn & 31, 8, hex(insn))
+        self.assertEqual({c[1] for c in cases}, set(range(len(spec.PATTERNS))))
+        self.assertGreater(sum(c[2] for c in cases), 1500)
 
     def test_generated_files_are_current(self):
         header = (ROOT / "bench" / "fpcheck_cases.h").read_text(encoding="utf-8").replace("\r\n", "\n")
