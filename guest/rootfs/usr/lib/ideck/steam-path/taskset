@@ -22,6 +22,15 @@ if [ "$#" -ge 2 ] && [ "${2##*/}" = steamwebhelper ]; then
             # device only when software rendering is requested).
             export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink LIBGL_ALWAYS_SOFTWARE=1 ;;
     esac
+    case "${IDECK_STEAM_WEBHELPER_GL:-}" in
+        zink*)
+            # Valve's steamwebhelper.sh sets LIBGL_KOPPER_DISABLE=true. Without
+            # kopper, Zink presents through DRI buffer sharing, which needs a
+            # real GPU driver; with Zink on lavapipe the window never drew
+            # (CI run 45200353511). Kopper presents through Vulkan's own
+            # swapchain (X11 WSI), which Venus and lavapipe both provide.
+            unset LIBGL_KOPPER_DISABLE ;;
+    esac
     exec "$@"
 fi
 exec /usr/bin/taskset "$@"
