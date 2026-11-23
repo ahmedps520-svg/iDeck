@@ -39,4 +39,30 @@ enum EngineGuard {
     static func clear(_ marker: URL) {
         try? FileManager.default.removeItem(at: marker)
     }
+
+    /// One line for the log and Settings from the agent's `fpcheck.run`
+    /// reply: Linux ran every floating-point instruction pattern and
+    /// compared the results with those recorded on real hardware when the
+    /// runtime was built. `ok` is false when any result differs.
+    static func checkSummary(_ r: [String: Any], nativeFP: Bool) -> (text: String, ok: Bool) {
+        let mode = nativeFP ? "native" : "emulated"
+        guard (r["reference"] as? Bool) == true else {
+            return ("\(mode): this runtime has no hardware reference to compare with", false)
+        }
+        let patterns = (r["patterns"] as? NSNumber)?.intValue ?? 0
+        let cpu = (r["reference_cpu"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "hardware"
+        if (r["match"] as? Bool) == true {
+            let flags = (r["flags_match"] as? Bool) == true ? "" : "; exception flags differ"
+            return ("\(mode): all \(patterns) instruction patterns match \(cpu)\(flags)", true)
+        }
+        let differ = (r["values_differ"] as? NSNumber)?.intValue ?? 0
+        let names = (r["values_differ_names"] as? [String] ?? []).prefix(6).joined(separator: ", ")
+        var parts: [String] = []
+        if differ > 0 { parts.append("\(differ) of \(patterns) instruction patterns differ from \(cpu)"
+                                     + (names.isEmpty ? "" : " (\(names))")) }
+        if (r["mix_values_equal"] as? Bool) != true { parts.append("mixed sequences differ") }
+        if let n = (r["sigill"] as? NSNumber)?.intValue, n > 0 { parts.append("\(n) patterns were illegal instructions") }
+        if let n = (r["missing"] as? NSNumber)?.intValue, n > 0 { parts.append("\(n) patterns did not run") }
+        return ("\(mode): " + (parts.isEmpty ? "the check did not match" : parts.joined(separator: "; ")), false)
+    }
 }

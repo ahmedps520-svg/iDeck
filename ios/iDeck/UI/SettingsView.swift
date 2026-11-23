@@ -98,6 +98,9 @@ struct SettingsView: View {
                         Text("Neoverse V1 (ARMv8.4, no SVE or PAuth)").tag("neoverse-v1")
                     }
                     Toggle("Native floating point", isOn: $model.settings.nativeFloatingPoint)
+                    if let check = model.runtime.engineCheck {
+                        LabeledContent("Floating-point check", value: check)
+                    }
                     Text("On by default. Linux's floating-point and vector math runs directly on this device's processor instead of being emulated in software, which speeds up games and Steam. Turn off if Linux or a game misbehaves; iDeck turns it off by itself if Linux fails to start twice in a row.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)

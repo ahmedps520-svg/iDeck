@@ -46,6 +46,10 @@ final class RuntimeController: ObservableObject {
     @Published private(set) var provision: [String: Any] = [:]
     @Published private(set) var displayConnected = false
     @Published private(set) var warnings: [String] = []
+    /// Result of the floating-point check in Linux (EngineGuard.checkSummary), once it has run.
+    @Published private(set) var engineCheck: String?
+    private var nativeFPInUse = false
+    private var bootRuntimeVersion = ""
     @Published var lastError: String?
 
     let controllers = ControllerBridge()
@@ -484,6 +488,8 @@ final class RuntimeController: ObservableObject {
             DiagLog.write("engine: native floating point switched off after \(EngineGuard.maxUnfinishedStarts) unfinished starts")
         }
         cfg.hostVfp = nativeFP.useNativeFP
+        nativeFPInUse = nativeFP.useNativeFP
+        bootRuntimeVersion = files.version
         if nativeFP.useNativeFP { EngineGuard.noteStart(Paths.nativeFPMarker) }
         DiagLog.write("engine: native floating point \(nativeFP.useNativeFP ? "on (x-host-vfp)" : "off")")
         if s.ramInFile {
@@ -777,6 +783,38 @@ final class RuntimeController: ObservableObject {
         if let st = try? await agent.requestDict("steam.status"), (st["service"] as? String) != "active" {
             _ = try? await agent.request("steam.start", timeout: 60)
         }
+        Task { await runEngineCheckOnce() }
+    }
+
+    private static let engineCheckKey = "ideck.engineCheck"
+
+    /// Once per runtime, app build and engine mode: Linux runs every
+    /// floating-point instruction pattern and compares with the results
+    /// recorded on real hardware when the runtime was built (agent
+    /// `fpcheck.run`, runtime 0.1.13+). The outcome goes to the log and to
+    /// Settings; a difference with native floating point on is a warning.
+    private func runEngineCheckOnce() async {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let stamp = "\(bootRuntimeVersion)|\(build)|\(nativeFPInUse)|"
+        if let done = UserDefaults.standard.string(forKey: RuntimeController.engineCheckKey), done.hasPrefix(stamp) {
+            engineCheck = String(done.dropFirst(stamp.count))
+            return
+        }
+        // Not while Steam is starting: the check keeps a vCPU busy for some seconds.
+        try? await Task.sleep(nanoseconds: 90 * 1_000_000_000)
+        guard let agent, case .running = phase else { return }
+        guard let reply = try? await agent.requestDict("fpcheck.run", ["quick": true], timeout: 900) else {
+            DiagLog.write("engine: floating-point check not available (runtime before 0.1.13, or it did not finish)")
+            return
+        }
+        let summary = EngineGuard.checkSummary(reply, nativeFP: nativeFPInUse)
+        let seconds = (reply["seconds"] as? NSNumber)?.doubleValue ?? 0
+        DiagLog.write("engine: floating-point check, \(summary.text) (\(String(format: "%.1f", seconds)) s)")
+        engineCheck = summary.text
+        if !summary.ok && nativeFPInUse {
+            warnings.append("Floating-point check: \(summary.text). Switch off Native floating point in Settings \u{203A} Advanced.")
+        }
+        UserDefaults.standard.set(stamp + summary.text, forKey: RuntimeController.engineCheckKey)
     }
 
     /// The launch options Steam last started with, as sent by this app.

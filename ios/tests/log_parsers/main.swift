@@ -185,5 +185,18 @@ check(EngineGuard.unfinishedStarts(fpMarker) == 2, "native FP marker: counts sta
 EngineGuard.clear(fpMarker)
 check(EngineGuard.unfinishedStarts(fpMarker) == 0, "native FP marker: cleared when Linux comes up")
 
+// The agent's fpcheck.run reply, as JSONSerialization delivers it.
+func fpReply(_ json: String) -> [String: Any] {
+    (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
+}
+let fpGood = EngineGuard.checkSummary(fpReply(#"{"reference": true, "patterns": 189, "match": true, "flags_match": true, "reference_cpu": "Neoverse-N2"}"#), nativeFP: true)
+check(fpGood.ok && fpGood.text == "native: all 189 instruction patterns match Neoverse-N2", "fpcheck summary: \(fpGood.text)")
+let fpFlags = EngineGuard.checkSummary(fpReply(#"{"reference": true, "patterns": 189, "match": true, "flags_match": false, "reference_cpu": ""}"#), nativeFP: false)
+check(fpFlags.ok && fpFlags.text == "emulated: all 189 instruction patterns match hardware; exception flags differ", "fpcheck summary: \(fpFlags.text)")
+let fpBad = EngineGuard.checkSummary(fpReply(#"{"reference": true, "patterns": 189, "match": false, "flags_match": true, "values_differ": 2, "values_differ_names": ["FADD_s", "FCMP"], "mix_values_equal": false, "sigill": 0, "missing": 0, "reference_cpu": "Neoverse-N2"}"#), nativeFP: true)
+check(!fpBad.ok && fpBad.text == "native: 2 of 189 instruction patterns differ from Neoverse-N2 (FADD_s, FCMP); mixed sequences differ", "fpcheck summary: \(fpBad.text)")
+let fpNone = EngineGuard.checkSummary(fpReply(#"{"reference": false, "patterns": 0, "match": false}"#), nativeFP: true)
+check(!fpNone.ok && fpNone.text.contains("no hardware reference"), "fpcheck summary without a reference")
+
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)
