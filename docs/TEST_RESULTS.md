@@ -443,6 +443,14 @@ Runtime 0.1.10 candidate (commit 94cc92b), `runtime.yml` boot tests with Steam's
   - That is on the CI host's fdatasync; the iPad's F_FULLFSYNC is logged from build 34.
 - **Zink, first attempt:** the window never drew. The web helper's GPU process loaded the Vulkan loader and `libvulkan_radeon` but had no device, because CI has no GPU and Zink skips CPU Vulkan devices. The next check runs Zink on lavapipe (`zink-cpu`).
 - **Tests:** agent 49 checks; `tools/tests` 25; guest Python 26 (including `steam_prefs.py`); all passed.
+- **Final 0.1.11 check** (run 45200353511, `max`, light library on, software UI):
+  - Steam's window appeared, the UI states worked, and there was no crash.
+  - A restart to the default drew the window in 62.6 s.
+  - Zink on lavapipe loaded (`libvulkan_lvp`, `libgallium` in the GPU process), but the window never drew.
+- **Zink with kopper** (run 45209949087, runtime 0.1.12 candidate):
+  - The window drew correctly in 120.8 s; the browser and GPU processes both ran on Zink over lavapipe.
+  - CPU in the following 60 s was 20.6%; a restart back to software drew the window in 72.6 s.
+- **Published:** runtime 0.1.11 (run 45209862503, commit 14e21d0), runtime 0.1.12 (Zink kopper fix, commit c805838), and app build 34 (run 45200443080, in the SideStore/AltStore feed).
 
 ### iOS app builds (`ios.yml`)
 

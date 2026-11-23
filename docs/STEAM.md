@@ -63,6 +63,9 @@ Settings › Steam › **GPU-drawn Steam UI** starts Steam without `-cef-disable
 - Chromium's OpenGL then runs on Vulkan through Mesa's Zink, which on the iPad means Venus and MoltenVK on Metal, instead of drawing on the emulated CPU.
 - Valve's ARM64 `steamwebhelper.sh` sets `LIBGL_KOPPER_DISABLE=true`, a Zink option. That suggests Valve runs Steam's UI on Zink on Steam Frame.
 - It needs Vulkan in Linux. Before build 31, long app-group names broke it (see [PERFORMANCE](PERFORMANCE.md)).
+- Zink presents through its own Vulkan swapchain ("kopper") from runtime 0.1.12. Valve's script turns kopper off (`LIBGL_KOPPER_DISABLE=true`); iDeck's wrapper removes that in this mode.
+  - Without kopper, Zink presents through DRI buffer sharing, which needs a real GPU driver. With Zink on lavapipe the window never drew (CI run 45200353511).
+  - With kopper, Steam's sign-in window drew correctly through Zink on lavapipe in 120.8 s (CI run 45209949087). Software drawing took 72.6 s; CI's Vulkan is itself software, so that comparison says nothing about the iPad.
 - Off by default; not yet tried on an iPad.
 - The agent operation `steam.webhelpers` lists each Chromium process with the graphics libraries it loaded. A Vulkan ICD (`libvulkan_virtio`) in the GPU process means Zink is in use.
 
