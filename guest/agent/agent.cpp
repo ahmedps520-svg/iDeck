@@ -252,7 +252,11 @@ Reply execute_slow(const Job& job) {
         // On unless the app says otherwise (builds before 33 do not send it).
         env += std::string("IDECK_STEAM_LIGHT_LIBRARY=") + (a["light_library"].as_bool(true) ? "1" : "0") + "\n";
         // Experimental: steamwebhelper's OpenGL through Zink (Vulkan/Venus).
-        env += std::string("IDECK_STEAM_WEBHELPER_GL=") + (a["webhelper_zink"].as_bool(false) ? "zink" : "") + "\n";
+        // "zink-cpu" is for CI only: Zink on lavapipe, which Mesa only uses
+        // when software rendering is requested.
+        std::string gl = a["webhelper_zink"].as_bool(false) ? "zink" : "";
+        if (a["webhelper_gl"].string_or("") == "zink-cpu") gl = "zink-cpu";
+        env += "IDECK_STEAM_WEBHELPER_GL=" + gl + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
         // disk survives runtime updates (system disk replacement).
         const std::string paths[] = {std::string(kStateDir) + "/steam.env", "/home/.ideck/steam.env"};

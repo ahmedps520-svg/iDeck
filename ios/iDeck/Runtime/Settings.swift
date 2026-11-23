@@ -29,7 +29,13 @@ struct Settings: Codable, Equatable {
     var profile: PerformanceProfile = .balanced
     var resolution: Resolution = .p720
     var guestMemoryMb: UInt64 = 0          // 0 = automatic
-    var cpuModel = "neoverse-n1"
+    /// QEMU's "max" (with PAuth, SVE and SME off, core/qemu_args) since
+    /// build 33: FEAT_MOPS lets glibc copy memory with QEMU's host memmove.
+    /// CI 2026-11-23: glibc memcpy +23-40%, FP +12-23%, Steam unchanged.
+    var cpuModel = "max"
+    /// Settings written before version 2 had neoverse-n1 as the default CPU
+    /// model; load() moves those to the new default once.
+    var settingsVersion = 2
     var vulkan = true
     /// Diagnostic: boot without GPU acceleration (plain virtio-gpu, SPICE 2D,
     /// software rendering in Linux). Slow, but isolates GPU-path crashes.
@@ -84,7 +90,12 @@ struct Settings: Codable, Equatable {
         }
         merged.merge(saved) { _, new in new }
         guard let mergedData = try? JSONSerialization.data(withJSONObject: merged),
-              let s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
+              var s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
+        if (saved["settingsVersion"] as? Int ?? 1) < 2 {
+            // neoverse-n1 was the default, not a choice, before version 2.
+            if s.cpuModel == "neoverse-n1" { s.cpuModel = "max" }
+            s.settingsVersion = 2
+        }
         return s
     }
 

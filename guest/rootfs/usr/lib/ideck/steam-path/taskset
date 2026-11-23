@@ -14,9 +14,14 @@
 # gets it; games started by Steam keep their own drivers.
 if [ "$#" -ge 2 ] && [ "${2##*/}" = steamwebhelper ]; then
     shift
-    if [ "${IDECK_STEAM_WEBHELPER_GL:-}" = zink ]; then
-        export MESA_LOADER_DRIVER_OVERRIDE=zink
-    fi
+    case "${IDECK_STEAM_WEBHELPER_GL:-}" in
+        zink)
+            export MESA_LOADER_DRIVER_OVERRIDE=zink ;;
+        zink-cpu)
+            # CI only: Zink on lavapipe (Mesa's Zink uses a CPU Vulkan
+            # device only when software rendering is requested).
+            export MESA_LOADER_DRIVER_OVERRIDE=zink GALLIUM_DRIVER=zink LIBGL_ALWAYS_SOFTWARE=1 ;;
+    esac
     exec "$@"
 fi
 exec /usr/bin/taskset "$@"

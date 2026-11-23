@@ -538,13 +538,15 @@ def main() -> int:
         if a.steam_zink_check and window_seen_at is not None:
             # GPU-drawn Steam UI through Zink. CI's Vulkan is lavapipe (CPU),
             # so this checks that the window draws, not how fast.
-            report["zink_check"] = restart_timing("zink", {"cef_software": False, "webhelper_zink": True})
+            # CI has no GPU and Zink ignores CPU Vulkan devices unless asked:
+            # "zink-cpu" puts it on lavapipe, which checks Chromium on Zink.
+            report["zink_check"] = restart_timing("zink", {"cef_software": False, "webhelper_gl": "zink-cpu"})
             try:
                 report["zink_check"]["webhelpers"] = agent.request("steam.webhelpers", timeout=60).get("processes")
                 log("steam-webhelpers-zink", report["zink_check"]["webhelpers"])
             except Exception as e:  # noqa: BLE001
                 log("steam-webhelpers-zink", str(e), ok=False)
-            restart_timing("back-to-default", {"webhelper_zink": False})
+            restart_timing("back-to-default", {"webhelper_gl": ""})
             jit("after-zink")
 
         # A Steam restart (the next iDeck launch) must not install the

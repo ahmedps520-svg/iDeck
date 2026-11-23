@@ -93,9 +93,9 @@ struct SettingsView: View {
             Section {
                 DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
                     Picker("CPU model", selection: $model.settings.cpuModel) {
-                        Text("Neoverse N1 (ARMv8.2, default)").tag("neoverse-n1")
+                        Text("max (fast memory copies, default)").tag("max")
+                        Text("Neoverse N1 (ARMv8.2)").tag("neoverse-n1")
                         Text("Neoverse V1 (ARMv8.4, no SVE or PAuth)").tag("neoverse-v1")
-                        Text("max (all emulated features)").tag("max")
                     }
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
                     Text("On by default. Keeps Linux's RAM in a file so \(Device.os) can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
