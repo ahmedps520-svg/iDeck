@@ -122,6 +122,19 @@ def build_bench(target: str | None, debug: bool) -> Path:
     return out
 
 
+def build_fpcheck(target: str | None, debug: bool) -> Path:
+    """bench/fpcheck.c: the host-VFP instruction check (AArch64 Linux; a stub elsewhere)."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    out = OUT / exe_name("ideck-fpcheck" + (f"-{target}" if target else ""), target)
+    flags = ["-std=gnu11", "-O2", "-Wall", "-Wextra"]
+    if target:
+        flags += ["-target", target]
+        if "linux" in target:
+            flags += ["-static"]
+    run(compiler("cc") + flags + [str(ROOT / "bench" / "fpcheck.c"), "-o", str(out)])
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("what", choices=["test", "agent", "bench", "lib", "all"])
@@ -148,6 +161,7 @@ def main() -> int:
             build_agent(args.target, args.debug)
     if args.what in ("bench", "all"):
         build_bench(args.target, args.debug)
+        build_fpcheck(args.target, args.debug)
     if args.what in ("lib", "all"):
         build_shared_lib(args.target, args.debug)
     return 0

@@ -23,6 +23,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -110,7 +114,7 @@ typedef struct {
     int ok;
 } result;
 
-static result g_results[16];
+static result g_results[24];
 static int g_nresults;
 
 static result* add_result(const char* name, const char* unit) {
@@ -215,6 +219,126 @@ static void bench_fp_single(int n) {
     snprintf(r->note, sizeof(r->note), "%dx%d matmul", n, n);
     r->ok = 1;
     free(a); free(b); free(c);
+}
+
+/* Scalar double arithmetic as game code does it: differences, a square
+   root and a division per pair of bodies (subtract, multiply, add, fsqrt,
+   fdiv), then the position update. */
+static void bench_fp_scalar(int steps) {
+    result* r = add_result("fp_scalar", "Mpairs/s");
+    enum { N = 8 };
+    double px[N], py[N], pz[N], vx[N], vy[N], vz[N], m[N];
+    for (int i = 0; i < N; ++i) {
+        px[i] = (double)i * 1.5 + 0.25;
+        py[i] = (double)(i * i) * 0.125 - 1.0;
+        pz[i] = (double)(N - i) * 0.75;
+        vx[i] = vy[i] = vz[i] = 0.0;
+        m[i] = 1.0 + (double)i * 0.1;
+    }
+    const double dt = 1e-3;
+    double t0 = now_s();
+    for (int s = 0; s < steps; ++s) {
+        for (int i = 0; i < N; ++i) {
+            double ax = 0, ay = 0, az = 0;
+            for (int j = 0; j < N; ++j) {
+                if (i == j) continue;
+                double dx = px[j] - px[i], dy = py[j] - py[i], dz = pz[j] - pz[i];
+                double d2 = dx * dx + dy * dy + dz * dz + 1e-9;
+                double inv = m[j] / (d2 * sqrt(d2));
+                ax += dx * inv;
+                ay += dy * inv;
+                az += dz * inv;
+            }
+            vx[i] += ax * dt;
+            vy[i] += ay * dt;
+            vz[i] += az * dt;
+        }
+        for (int i = 0; i < N; ++i) {
+            px[i] += vx[i] * dt;
+            py[i] += vy[i] * dt;
+            pz[i] += vz[i] * dt;
+        }
+    }
+    double el = now_s() - t0;
+    double check = 0;
+    for (int i = 0; i < N; ++i) check += px[i] + py[i] + pz[i];
+    g_sink = (uint64_t)(check * 1e6);
+    r->seconds = el;
+    r->value = (double)steps * N * (N - 1) / el / 1e6;
+    snprintf(r->note, sizeof(r->note), "%d-body, %d steps, check %.6f", N, steps, check);
+    r->ok = 1;
+}
+
+/* Single-precision vector arithmetic (NEON on AArch64): y += a*x and a
+   dot product over arrays that fit the L1 cache. */
+static void bench_fp_vector(int reps) {
+    result* r = add_result("fp_vector", "Melem/s");
+    enum { N = 4096 };
+    static float x[N], y[N];
+    for (int i = 0; i < N; ++i) {
+        x[i] = (float)(i % 97) * 0.03125f - 1.0f;
+        y[i] = (float)(i % 61) * 0.015625f;
+    }
+    float dot = 0;
+    double t0 = now_s();
+    for (int k = 0; k < reps; ++k) {
+        float a = 1.0f / (float)(k % 7 + 2);
+#if defined(__aarch64__) && defined(__ARM_NEON)
+        float32x4_t va = vdupq_n_f32(a), acc = vdupq_n_f32(0);
+        for (int i = 0; i < N; i += 4) {
+            float32x4_t vx = vld1q_f32(x + i);
+            float32x4_t vy = vfmaq_f32(vld1q_f32(y + i), va, vx);
+            vy = vmulq_f32(vy, vdupq_n_f32(0.999f));
+            vst1q_f32(y + i, vy);
+            acc = vaddq_f32(acc, vmulq_f32(vy, vx));
+        }
+        dot += vaddvq_f32(acc);
+#else
+        float acc = 0;
+        for (int i = 0; i < N; ++i) {
+            y[i] = (y[i] + a * x[i]) * 0.999f;
+            acc += y[i] * x[i];
+        }
+        dot += acc;
+#endif
+    }
+    double el = now_s() - t0;
+    g_sink = (uint64_t)(dot * 1000.0f);
+    r->seconds = el;
+    r->value = (double)reps * N / el / 1e6;
+    snprintf(r->note, sizeof(r->note), "saxpy + dot, %d floats x %d, check %.3f", N, reps, (double)dot);
+    r->ok = 1;
+}
+
+/* Conversions and compares: integer to double, a compare-and-branch per
+   iteration, and double to integer (an escape-time fractal). */
+static void bench_fp_convert(int size, int max_iter) {
+    result* r = add_result("fp_convert", "Miter/s");
+    uint64_t iters = 0, sum = 0;
+    double t0 = now_s();
+    for (int py = 0; py < size; ++py) {
+        double cy = (double)py * (2.4 / (double)size) - 1.2;
+        for (int px = 0; px < size; ++px) {
+            double cx = (double)px * (3.0 / (double)size) - 2.1;
+            double zx = 0, zy = 0;
+            int it = 0;
+            while (it < max_iter && zx * zx + zy * zy < 4.0) {
+                double t = zx * zx - zy * zy + cx;
+                zy = 2.0 * zx * zy + cy;
+                zx = t;
+                ++it;
+            }
+            iters += (uint64_t)it;
+            sum += (uint64_t)(int64_t)(zx * 1000.0) & 0xff;
+        }
+    }
+    double el = now_s() - t0;
+    g_sink = sum;
+    r->seconds = el;
+    r->value = (double)iters / el / 1e6;
+    snprintf(r->note, sizeof(r->note), "%dx%d, max %d, check %llu", size, size, max_iter,
+             (unsigned long long)(iters + sum));
+    r->ok = 1;
 }
 
 /* ---- memory ------------------------------------------------------------ */
@@ -502,6 +626,9 @@ int main(int argc, char** argv) {
     bench_int_single(int_iters);
     double single = g_results[g_nresults - 1].value;
     bench_fp_single(fp_n);
+    bench_fp_scalar(quick ? 20000 : 400000);
+    bench_fp_vector(quick ? 2000 : 40000);
+    bench_fp_convert(quick ? 128 : 512, 200);
     bench_int_multi(int_iters, threads, single);
     bench_memory(mem, mem_reps);
     bench_memcpy_glibc(mem, mem_reps);

@@ -117,9 +117,11 @@ jobs:
             guest/rootfs/usr/lib/ideck/session guest/rootfs/usr/lib/ideck/set-resolution guest/rootfs/usr/lib/ideck/init-home \
             guest/rootfs/usr/lib/ideck/zram-swap guest/rootfs/usr/lib/ideck/steam-path/taskset
       - name: Python syntax
-        run: python3 -m py_compile guest/rootfs/usr/lib/ideck/*.py tools/*.py linux/*.py
+        run: python3 -m py_compile guest/rootfs/usr/lib/ideck/*.py tools/*.py linux/*.py engine/*.py
       - name: Tool tests (SideStore/AltStore feed)
         run: python3 -m unittest discover -s tools/tests -v
+      - name: Engine tool tests (host-VFP pattern table)
+        run: python3 -m unittest discover -s engine/tests -v
       - name: systemd units
         run: |
           bash tools/ci_apt.sh systemd

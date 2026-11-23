@@ -1,0 +1,1273 @@
+diff --git a/fpu/softfloat.c b/fpu/softfloat.c
+index 34c962d..c2de039 100644
+--- a/fpu/softfloat.c
++++ b/fpu/softfloat.c
+@@ -227,13 +227,20 @@ GEN_INPUT_FLUSH3(float64_input_flush3, float64)
+ # define QEMU_SOFTFLOAT_ATTR QEMU_FLATTEN __attribute__((noinline))
+ #endif
+ 
++/*
++ * Set while this thread's host rounding mode is not round-to-nearest
++ * (target/arm host_vfp passes the guest FPCR through to the host).
++ */
++__thread bool float_host_rounding_altered;
++
+ static inline bool can_use_fpu(const float_status *s)
+ {
+     if (QEMU_NO_HARDFLOAT) {
+         return false;
+     }
+     return likely(s->float_exception_flags & float_flag_inexact &&
+-                  s->float_rounding_mode == float_round_nearest_even);
++                  s->float_rounding_mode == float_round_nearest_even &&
++                  !float_host_rounding_altered);
+ }
+ 
+ /*
+diff --git a/include/fpu/softfloat.h b/include/fpu/softfloat.h
+index c18ab2c..984f593 100644
+--- a/include/fpu/softfloat.h
++++ b/include/fpu/softfloat.h
+@@ -97,6 +97,12 @@ typedef enum {
+ #include "fpu/softfloat-helpers.h"
+ #include "qemu/int128.h"
+ 
++/*
++ * True while the host rounding mode of this thread is not
++ * round-to-nearest; the host-FPU fast paths are then skipped.
++ */
++extern __thread bool float_host_rounding_altered;
++
+ /*----------------------------------------------------------------------------
+ | Routine to raise any or all of the software IEC/IEEE floating-point
+ | exception flags.
+diff --git a/include/tcg/tcg-host-vfp.h b/include/tcg/tcg-host-vfp.h
+new file mode 100644
+index 0000000..434002f
+--- /dev/null
++++ b/include/tcg/tcg-host-vfp.h
+@@ -0,0 +1,58 @@
++/*
++ * Host FP/AdvSIMD instruction pass-through (iDeck).
++ *
++ * When guest and host are both AArch64, a guest FP/AdvSIMD instruction
++ * whose operands are only V registers (plus, for a few, one general
++ * register or NZCV) can run unchanged on the host CPU instead of going
++ * through a softfloat helper.  INDEX_op_host_vfp does that for one
++ * instruction: it loads the guest V registers it names from env into
++ * reserved host registers, runs the (re-registered) instruction, and
++ * stores the result back.
++ *
++ * The opcode has constant arguments only:
++ *   args[0]     the instruction word, register fields already rewritten
++ *               to TCG_HVFP_VREG(slot) / TCG_HVFP_GPR
++ *   args[1]     control word, see TCG_HVFP_CTL
++ *   args[2..7]  load words, see TCG_HVFP_LOAD; 0 = unused
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#ifndef TCG_HOST_VFP_H
++#define TCG_HOST_VFP_H
++
++/* What surrounds the instruction. */
++enum {
++    TCG_HVFP_VEC,           /* V registers only */
++    TCG_HVFP_FLAGS_OUT,     /* then NZCV -> xchg[0] */
++    TCG_HVFP_FLAGS_INOUT,   /* xchg[0] -> NZCV first, NZCV -> xchg[0] after */
++    TCG_HVFP_GPR_OUT,       /* then TCG_HVFP_GPR -> xchg[0] */
++    TCG_HVFP_GPR_OUT_FLAGS, /* then TCG_HVFP_GPR -> xchg[0], NZCV -> xchg[1] */
++    TCG_HVFP_GPR_IN,        /* xchg[0] -> TCG_HVFP_GPR first */
++};
++
++#define TCG_HVFP_NSLOTS      6
++/* Host V register that holds slot N (consecutive: TBL needs that). */
++#define TCG_HVFP_VREG(slot)  (25 + (slot))
++/* Host general register used by the GPR and flags kinds (x16). */
++#define TCG_HVFP_GPR         16
++
++/* Load a 128-bit guest register at env + OFS into slot SLOT. */
++#define TCG_HVFP_LOAD(slot, ofs) \
++    (((uint32_t)(ofs) << 8) | ((slot) << 1) | 1)
++
++/*
++ * Control word: KIND; whether to store slot SSLOT (128 bits) to
++ * env + SOFS afterwards; and the env offset of the two 64-bit exchange
++ * words used by the flags and GPR kinds.
++ */
++#define TCG_HVFP_CTL(kind, store, sslot, sofs, xchg) \
++    ((uint64_t)(kind) | ((store) ? 8 : 0) | ((uint64_t)(sslot) << 4) | \
++     ((uint64_t)(uint32_t)(sofs) << 8) | ((uint64_t)(uint32_t)(xchg) << 40))
++
++/* True if this build's TCG backend implements INDEX_op_host_vfp. */
++bool tcg_host_vfp_supported(void);
++void tcg_gen_host_vfp(uint32_t insn, uint64_t ctl,
++                      const uint32_t loads[TCG_HVFP_NSLOTS]);
++
++#endif /* TCG_HOST_VFP_H */
+diff --git a/include/tcg/tcg-opc.h b/include/tcg/tcg-opc.h
+index 9f73771..1820b24 100644
+--- a/include/tcg/tcg-opc.h
++++ b/include/tcg/tcg-opc.h
+@@ -37,6 +37,13 @@ DEF(br, 0, 0, 1, TCG_OPF_BB_END | TCG_OPF_NOT_PRESENT)
+ 
+ DEF(mb, 0, 0, 1, TCG_OPF_NOT_PRESENT)
+ 
++/*
++ * Run one host FP/AdvSIMD instruction on guest registers held in env.
++ * Constant arguments only; see tcg/tcg-host-vfp.h.  Emitted directly by
++ * tcg_gen_code on hosts that define TCG_TARGET_HAS_host_vfp.
++ */
++DEF(host_vfp, 0, 0, 8, TCG_OPF_NOT_PRESENT)
++
+ DEF(mov_i32, 1, 1, 0, TCG_OPF_NOT_PRESENT)
+ DEF(setcond_i32, 1, 2, 1, 0)
+ DEF(negsetcond_i32, 1, 2, 1, 0)
+diff --git a/target/arm/cpu.c b/target/arm/cpu.c
+index 8834666..8f71902 100644
+--- a/target/arm/cpu.c
++++ b/target/arm/cpu.c
+@@ -33,6 +33,8 @@
+ #endif /* CONFIG_TCG */
+ #include "internals.h"
+ #include "cpu-features.h"
++#include "host-vfp.h"
++#include "qemu/error-report.h"
+ #include "exec/exec-all.h"
+ #include "hw/qdev-properties.h"
+ #if !defined(CONFIG_USER_ONLY)
+@@ -2138,6 +2140,25 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
+         cpu->isar.mvfr0 = u;
+     }
+ 
++    if (cpu->host_vfp) {
++        if (!tcg_enabled() || !arm_host_vfp_available() ||
++            !arm_feature(env, ARM_FEATURE_AARCH64)) {
++            warn_report("x-host-vfp needs TCG on an AArch64 host and an "
++                        "AArch64 CPU model; ignored");
++            cpu->host_vfp = false;
++        } else {
++            /*
++             * The guest FPCR is passed through to the host.  FEAT_AFP
++             * changes what many of the listed instructions do and only
++             * some hosts have it, so the guest does not get it.
++             */
++            uint64_t t = cpu->isar.id_aa64mmfr1;
++
++            t = FIELD_DP64(t, ID_AA64MMFR1, AFP, 0);
++            cpu->isar.id_aa64mmfr1 = t;
++        }
++    }
++
+     if (!cpu->has_vfp) {
+         uint64_t t;
+         uint32_t u;
+@@ -2652,6 +2673,7 @@ static const Property arm_cpu_properties[] = {
+     DEFINE_PROP_INT32("core-count", ARMCPU, core_count, -1),
+     /* True to default to the backward-compat old CNTFRQ rather than 1Ghz */
+     DEFINE_PROP_BOOL("backcompat-cntfrq", ARMCPU, backcompat_cntfrq, false),
++    DEFINE_PROP_BOOL("x-host-vfp", ARMCPU, host_vfp, false),
+     DEFINE_PROP_BOOL("backcompat-pauth-default-use-qarma5", ARMCPU,
+                       backcompat_pauth_default_use_qarma5, false),
+ };
+@@ -2682,6 +2704,26 @@ static const struct SysemuCPUOps arm_sysemu_ops = {
+ #endif
+ 
+ #ifdef CONFIG_TCG
++#ifndef CONFIG_USER_ONLY
++static void arm_cpu_exec_enter(CPUState *cs)
++{
++    ARMCPU *cpu = ARM_CPU(cs);
++
++    if (cpu->host_vfp) {
++        arm_host_vfp_exec_enter(&cpu->env);
++    }
++}
++
++static void arm_cpu_exec_exit(CPUState *cs)
++{
++    ARMCPU *cpu = ARM_CPU(cs);
++
++    if (cpu->host_vfp) {
++        arm_host_vfp_exec_exit(&cpu->env);
++    }
++}
++#endif
++
+ static const TCGCPUOps arm_tcg_ops = {
+     .initialize = arm_translate_init,
+     .translate_code = arm_translate_code,
+@@ -2694,6 +2736,8 @@ static const TCGCPUOps arm_tcg_ops = {
+     .record_sigbus = arm_cpu_record_sigbus,
+ #else
+     .tlb_fill_align = arm_cpu_tlb_fill_align,
++    .cpu_exec_enter = arm_cpu_exec_enter,
++    .cpu_exec_exit = arm_cpu_exec_exit,
+     .cpu_exec_interrupt = arm_cpu_exec_interrupt,
+     .cpu_exec_halt = arm_cpu_exec_halt,
+     .do_interrupt = arm_cpu_do_interrupt,
+diff --git a/target/arm/cpu.h b/target/arm/cpu.h
+index 611469f..cbc3bb3 100644
+--- a/target/arm/cpu.h
++++ b/target/arm/cpu.h
+@@ -683,6 +683,12 @@ typedef struct CPUArchState {
+         uint64_t fpsr;
+         uint64_t fpcr;
+ 
++        /*
++         * Exchange words of INDEX_op_host_vfp: a general register or
++         * NZCV on its way to or from a host FP instruction.
++         */
++        uint64_t host_xchg[2];
++
+         uint32_t xregs[16];
+ 
+         /* Scratch space for aa32 neon expansion.  */
+@@ -1008,6 +1014,13 @@ struct ArchCPU {
+     /* QOM property to indicate we should use the back-compat CNTFRQ default */
+     bool backcompat_cntfrq;
+ 
++    /*
++     * QOM property x-host-vfp: run a fixed list of A64 FP/AdvSIMD
++     * instructions on the host CPU instead of softfloat helpers
++     * (AArch64 hosts with the TCG JIT only; see host-vfp.h).
++     */
++    bool host_vfp;
++
+     /* QOM property to indicate we should use the back-compat QARMA5 default */
+     bool backcompat_pauth_default_use_qarma5;
+ 
+diff --git a/target/arm/host-vfp.h b/target/arm/host-vfp.h
+new file mode 100644
+index 0000000..9df321f
+--- /dev/null
++++ b/target/arm/host-vfp.h
+@@ -0,0 +1,63 @@
++/*
++ * AArch64 guest FP/AdvSIMD instructions run on an AArch64 host (iDeck).
++ *
++ * With "-cpu ...,x-host-vfp=on" the A64 translator emits the guest's own
++ * instruction for a fixed list of FP/AdvSIMD encodings (host-vfp-a64.c.inc)
++ * instead of calling softfloat helpers.  For that to be exact:
++ *  - while a vCPU thread executes guest code, the host FPCR holds the
++ *    guest's rounding mode, FZ, DN and AHP.  FEAT_AFP (FPCR.AH, FIZ, NEP)
++ *    is hidden from the guest, whatever the host has, so that every
++ *    host behaves like the hosts this was tested on;
++ *  - the host FPSR accumulates the guest's cumulative exception bits and
++ *    is folded into env->vfp.fpsr whenever that is read, written or the
++ *    thread leaves cpu_exec.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#ifndef TARGET_ARM_HOST_VFP_H
++#define TARGET_ARM_HOST_VFP_H
++
++#if defined(__aarch64__) && defined(CONFIG_TCG) && \
++    !defined(CONFIG_TCG_INTERPRETER) && \
++    !defined(CONFIG_TCG_THREADED_INTERPRETER) && \
++    !defined(CONFIG_USER_ONLY)
++#define ARM_HOST_VFP 1
++#endif
++
++/* Host CPU features that individual patterns need. */
++enum {
++    ARM_HOST_VFP_FEAT_NONE,
++    ARM_HOST_VFP_FEAT_JSCVT,
++    ARM_HOST_VFP_FEAT_AES,
++    ARM_HOST_VFP_FEAT_SHA1,
++    ARM_HOST_VFP_FEAT_SHA256,
++    ARM_HOST_VFP_FEAT_PMULL,
++};
++
++#ifdef ARM_HOST_VFP
++/* True if this build and host can run guest FP instructions directly. */
++bool arm_host_vfp_available(void);
++/* True if the host has the feature (ARM_HOST_VFP_FEAT_*). */
++bool arm_host_vfp_has_feat(unsigned feat);
++
++/* The vCPU thread enters/leaves cpu_exec for @env. */
++void arm_host_vfp_exec_enter(CPUARMState *env);
++void arm_host_vfp_exec_exit(CPUARMState *env);
++/* env->vfp.fpcr changed. */
++void arm_host_vfp_fpcr_changed(CPUARMState *env);
++/* Fold the host cumulative exception bits into env->vfp.fpsr. */
++void arm_host_vfp_sync_fpsr(CPUARMState *env);
++/* env->vfp.fpsr was written by the guest: drop the bits the host holds. */
++void arm_host_vfp_reset_fpsr(CPUARMState *env);
++#else
++static inline bool arm_host_vfp_available(void) { return false; }
++static inline bool arm_host_vfp_has_feat(unsigned feat) { return false; }
++static inline void arm_host_vfp_exec_enter(CPUARMState *env) {}
++static inline void arm_host_vfp_exec_exit(CPUARMState *env) {}
++static inline void arm_host_vfp_fpcr_changed(CPUARMState *env) {}
++static inline void arm_host_vfp_sync_fpsr(CPUARMState *env) {}
++static inline void arm_host_vfp_reset_fpsr(CPUARMState *env) {}
++#endif
++
++#endif /* TARGET_ARM_HOST_VFP_H */
+diff --git a/target/arm/tcg/host-vfp-a64.c.inc b/target/arm/tcg/host-vfp-a64.c.inc
+new file mode 100644
+index 0000000..64ee9e7
+--- /dev/null
++++ b/target/arm/tcg/host-vfp-a64.c.inc
+@@ -0,0 +1,240 @@
++/*
++ * A64 FP/AdvSIMD instructions that run on an AArch64 host as they are
++ * (iDeck, "-cpu ...,x-host-vfp=on").  Included by translate-a64.c.
++ *
++ * host_vfp_try() recognises the encodings listed in host-vfp-pats.c.inc
++ * (generated by iDeck's engine/hostvfp_spec.py, which also generates the
++ * test that compares each of them with real hardware) and emits one
++ * INDEX_op_host_vfp for them: the guest V registers the instruction names
++ * are loaded from env into host slot registers, the instruction runs with
++ * its register fields renumbered, and the result is stored back.  Guest
++ * registers that are the same stay the same host register, so aliasing
++ * behaves as on hardware.  See host-vfp.h for the FPCR/FPSR side.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++typedef struct HostVfpPat {
++    uint32_t mask;
++    uint32_t value;
++    uint32_t flags;
++} HostVfpPat;
++
++/* flags; the low three bits are the TCG_HVFP_* kind */
++#define HV_KIND_MASK   7
++#define HV_RD          (1 << 3)   /* Rd names a V register that is written */
++#define HV_RD_IN       (1 << 4)   /* ... and its old value is an input */
++#define HV_RN          (1 << 5)   /* Rn names a V register */
++#define HV_RM          (1 << 6)   /* Rm names a V register */
++#define HV_RA          (1 << 7)   /* Ra names a V register */
++#define HV_SCALAR      (1 << 8)   /* scalar result: FPCR.NEP merges old Rd */
++#define HV_VEC_SD      (1 << 9)   /* Q=0 with sz=1 is unallocated */
++#define HV_Q1          (1 << 10)  /* only allocated with Q=1 */
++#define HV_NO_AH       (1 << 11)  /* depends on FEAT_RPRES when FPCR.AH=1 */
++#define HV_TBL         (1 << 12)  /* table registers Rn .. Rn+len */
++#define HV_FEAT_SHIFT  16
++
++static const HostVfpPat host_vfp_pats[] = {
++#include "host-vfp-pats.c.inc"
++};
++
++/* The exchange words and every V register must be directly addressable. */
++QEMU_BUILD_BUG_ON(offsetof(CPUARMState, vfp.host_xchg) % 8 != 0);
++QEMU_BUILD_BUG_ON(offsetof(CPUARMState, vfp.host_xchg) + 16 > 0x7ff8);
++QEMU_BUILD_BUG_ON(offsetof(CPUARMState, vfp.zregs) % 16 != 0);
++QEMU_BUILD_BUG_ON(sizeof(ARMVectorReg) % 16 != 0);
++QEMU_BUILD_BUG_ON(offsetof(CPUARMState, vfp.zregs[31]) > 0xfff * 16);
++
++static bool host_vfp_guest_has(DisasContext *s, unsigned feat)
++{
++    switch (feat) {
++    case ARM_HOST_VFP_FEAT_NONE:
++        return true;
++    case ARM_HOST_VFP_FEAT_JSCVT:
++        return dc_isar_feature(aa64_jscvt, s);
++    case ARM_HOST_VFP_FEAT_AES:
++        return dc_isar_feature(aa64_aes, s);
++    case ARM_HOST_VFP_FEAT_SHA1:
++        return dc_isar_feature(aa64_sha1, s);
++    case ARM_HOST_VFP_FEAT_SHA256:
++        return dc_isar_feature(aa64_sha256, s);
++    case ARM_HOST_VFP_FEAT_PMULL:
++        return dc_isar_feature(aa64_pmull, s);
++    default:
++        return false;
++    }
++}
++
++typedef struct HostVfpMap {
++    int greg[TCG_HVFP_NSLOTS];    /* guest V register in each slot, or -1 */
++    bool load[TCG_HVFP_NSLOTS];
++} HostVfpMap;
++
++/* The slot that holds guest register @greg, taking a free one if needed. */
++static int host_vfp_slot(HostVfpMap *m, int greg)
++{
++    int free_slot = -1;
++
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        if (m->greg[i] == greg) {
++            return i;
++        }
++        if (m->greg[i] < 0 && free_slot < 0) {
++            free_slot = i;
++        }
++    }
++    g_assert(free_slot >= 0);
++    m->greg[free_slot] = greg;
++    return free_slot;
++}
++
++/*
++ * If @insn is on the list, emit it as a host instruction and return true
++ * (also when all that was emitted is the FP access trap).
++ */
++static bool host_vfp_try(DisasContext *s, uint32_t insn)
++{
++    const int xchg = offsetof(CPUARMState, vfp.host_xchg);
++    const HostVfpPat *p = NULL;
++    HostVfpMap m;
++    uint32_t loads[TCG_HVFP_NSLOTS] = { };
++    uint32_t out = insn;
++    unsigned flags, kind;
++    int rd = extract32(insn, 0, 5);
++    int rn = extract32(insn, 5, 5);
++    int rm = extract32(insn, 16, 5);
++    int ra = extract32(insn, 10, 5);
++    bool store = false;
++    int sslot = 0, sofs = 0, nloads = 0;
++    TCGv_i64 t;
++
++    /* All of them are in the "Scalar Floating-Point and AdvSIMD" class. */
++    if ((insn & 0x0e000000) != 0x0e000000) {
++        return false;
++    }
++    for (int i = 0; i < ARRAY_SIZE(host_vfp_pats); i++) {
++        if ((insn & host_vfp_pats[i].mask) == host_vfp_pats[i].value) {
++            p = &host_vfp_pats[i];
++            break;
++        }
++    }
++    if (!p) {
++        return false;
++    }
++    flags = p->flags;
++    kind = flags & HV_KIND_MASK;
++
++    /* Encodings the mask lets through that are unallocated. */
++    if ((flags & HV_VEC_SD) && extract32(insn, 22, 1) && !extract32(insn, 30, 1)) {
++        return false;
++    }
++    if ((flags & HV_Q1) && !extract32(insn, 30, 1)) {
++        return false;
++    }
++    if ((flags & HV_NO_AH) && s->fpcr_ah) {
++        return false;
++    }
++    if (flags >> HV_FEAT_SHIFT) {
++        unsigned feat = flags >> HV_FEAT_SHIFT;
++
++        if (!host_vfp_guest_has(s, feat) || !arm_host_vfp_has_feat(feat)) {
++            return false;
++        }
++    }
++
++    if (!fp_access_check(s)) {
++        return true;
++    }
++
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        m.greg[i] = -1;
++        m.load[i] = false;
++    }
++
++    if (flags & HV_TBL) {
++        /* The table registers are consecutive: slots 2.. hold them. */
++        int len = extract32(insn, 13, 2) + 1;
++
++        for (int i = 0; i < len; i++) {
++            /* A table that wraps around can name a register twice. */
++            m.greg[2 + i] = (rn + i) % 32;
++            m.load[2 + i] = true;
++        }
++        out = deposit32(out, 5, 5, TCG_HVFP_VREG(2));
++    } else if (flags & HV_RN) {
++        int sl = host_vfp_slot(&m, rn);
++
++        m.load[sl] = true;
++        out = deposit32(out, 5, 5, TCG_HVFP_VREG(sl));
++    }
++    if (flags & HV_RM) {
++        int sl = host_vfp_slot(&m, rm);
++
++        m.load[sl] = true;
++        out = deposit32(out, 16, 5, TCG_HVFP_VREG(sl));
++    }
++    if (flags & HV_RA) {
++        int sl = host_vfp_slot(&m, ra);
++
++        m.load[sl] = true;
++        out = deposit32(out, 10, 5, TCG_HVFP_VREG(sl));
++    }
++    if (flags & HV_RD) {
++        int sl = host_vfp_slot(&m, rd);
++
++        if ((flags & HV_RD_IN) || ((flags & HV_SCALAR) && s->fpcr_nep)) {
++            m.load[sl] = true;
++        }
++        out = deposit32(out, 0, 5, TCG_HVFP_VREG(sl));
++        store = true;
++        sslot = sl;
++        sofs = vec_full_reg_offset(s, rd);
++    }
++
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        if (m.load[i]) {
++            loads[nloads++] = TCG_HVFP_LOAD(i, vec_full_reg_offset(s, m.greg[i]));
++        }
++    }
++
++    switch (kind) {
++    case TCG_HVFP_GPR_IN:
++        out = deposit32(out, 5, 5, TCG_HVFP_GPR);
++        tcg_gen_st_i64(cpu_reg(s, rn), tcg_env, xchg);
++        break;
++    case TCG_HVFP_GPR_OUT:
++    case TCG_HVFP_GPR_OUT_FLAGS:
++        out = deposit32(out, 0, 5, TCG_HVFP_GPR);
++        break;
++    case TCG_HVFP_FLAGS_INOUT:
++        t = tcg_temp_new_i64();
++        gen_get_nzcv(t);
++        tcg_gen_st_i64(t, tcg_env, xchg);
++        break;
++    default:
++        break;
++    }
++
++    tcg_gen_host_vfp(out, TCG_HVFP_CTL(kind, store, sslot, sofs, xchg), loads);
++
++    switch (kind) {
++    case TCG_HVFP_FLAGS_OUT:
++    case TCG_HVFP_FLAGS_INOUT:
++        t = tcg_temp_new_i64();
++        tcg_gen_ld_i64(t, tcg_env, xchg);
++        gen_set_nzcv(t);
++        break;
++    case TCG_HVFP_GPR_OUT:
++        tcg_gen_ld_i64(cpu_reg(s, rd), tcg_env, xchg);
++        break;
++    case TCG_HVFP_GPR_OUT_FLAGS:
++        tcg_gen_ld_i64(cpu_reg(s, rd), tcg_env, xchg);
++        t = tcg_temp_new_i64();
++        tcg_gen_ld_i64(t, tcg_env, xchg + 8);
++        gen_set_nzcv(t);
++        break;
++    default:
++        break;
++    }
++    return true;
++}
+diff --git a/target/arm/tcg/host-vfp-pats.c.inc b/target/arm/tcg/host-vfp-pats.c.inc
+new file mode 100644
+index 0000000..10f6777
+--- /dev/null
++++ b/target/arm/tcg/host-vfp-pats.c.inc
+@@ -0,0 +1,190 @@
++/*
++ * Generated by iDeck engine/hostvfp_spec.py --table; do not edit.
++ * { mask, value, flags } for instructions that run on the host as is.
++ */
++    { 0xffa0fc00, 0x1e200800, 0x000168 }, /* FMUL_s */
++    { 0xffa0fc00, 0x1e201800, 0x000168 }, /* FDIV_s */
++    { 0xffa0fc00, 0x1e202800, 0x000168 }, /* FADD_s */
++    { 0xffa0fc00, 0x1e203800, 0x000168 }, /* FSUB_s */
++    { 0xffa0fc00, 0x1e204800, 0x000168 }, /* FMAX_s */
++    { 0xffa0fc00, 0x1e205800, 0x000168 }, /* FMIN_s */
++    { 0xffa0fc00, 0x1e206800, 0x000168 }, /* FMAXNM_s */
++    { 0xffa0fc00, 0x1e207800, 0x000168 }, /* FMINNM_s */
++    { 0xffa0fc00, 0x1e208800, 0x000168 }, /* FNMUL_s */
++    { 0xffbffc00, 0x1e21c000, 0x000128 }, /* FSQRT_s */
++    { 0xffbffc00, 0x1e244000, 0x000128 }, /* FRINTN_s */
++    { 0xffbffc00, 0x1e24c000, 0x000128 }, /* FRINTP_s */
++    { 0xffbffc00, 0x1e254000, 0x000128 }, /* FRINTM_s */
++    { 0xffbffc00, 0x1e25c000, 0x000128 }, /* FRINTZ_s */
++    { 0xffbffc00, 0x1e264000, 0x000128 }, /* FRINTA_s */
++    { 0xffbffc00, 0x1e274000, 0x000128 }, /* FRINTX_s */
++    { 0xffbffc00, 0x1e27c000, 0x000128 }, /* FRINTI_s */
++    { 0xfffffc00, 0x1e22c000, 0x000128 }, /* FCVT_s_ds */
++    { 0xfffffc00, 0x1e624000, 0x000128 }, /* FCVT_s_sd */
++    { 0xff800000, 0x1f000000, 0x0001e8 }, /* FMADD_all */
++    { 0xffa0fc0f, 0x1e202000, 0x000061 }, /* FCMP */
++    { 0xffbffc0f, 0x1e202008, 0x000021 }, /* FCMP_z */
++    { 0xffa00c00, 0x1e200400, 0x000062 }, /* FCCMP */
++    { 0xffa0fc00, 0x5e20dc00, 0x000168 }, /* FMULX_s */
++    { 0xffa0fc00, 0x5e20e400, 0x000168 }, /* FCMEQ_s */
++    { 0xffa0fc00, 0x7e20e400, 0x000168 }, /* FCMGE_s */
++    { 0xffa0fc00, 0x7ea0e400, 0x000168 }, /* FCMGT_s */
++    { 0xffa0fc00, 0x7e20ec00, 0x000168 }, /* FACGE_s */
++    { 0xffa0fc00, 0x7ea0ec00, 0x000168 }, /* FACGT_s */
++    { 0xffa0fc00, 0x7ea0d400, 0x000168 }, /* FABD_s */
++    { 0xffa0fc00, 0x5e20fc00, 0x000168 }, /* FRECPS_s */
++    { 0xffa0fc00, 0x5ea0fc00, 0x000168 }, /* FRSQRTS_s */
++    { 0xffbffc00, 0x7e30d800, 0x000128 }, /* FADDP_s */
++    { 0xffbffc00, 0x7e30f800, 0x000128 }, /* FMAXP_s */
++    { 0xffbffc00, 0x7eb0f800, 0x000128 }, /* FMINP_s */
++    { 0xffbffc00, 0x7e30c800, 0x000128 }, /* FMAXNMP_s */
++    { 0xffbffc00, 0x7eb0c800, 0x000128 }, /* FMINNMP_s */
++    { 0xffbffc00, 0x5ea0c800, 0x000128 }, /* FCMGT0_s */
++    { 0xffbffc00, 0x7ea0c800, 0x000128 }, /* FCMGE0_s */
++    { 0xffbffc00, 0x5ea0d800, 0x000128 }, /* FCMEQ0_s */
++    { 0xffbffc00, 0x7ea0d800, 0x000128 }, /* FCMLE0_s */
++    { 0xffbffc00, 0x5ea0e800, 0x000128 }, /* FCMLT0_s */
++    { 0xffbffc00, 0x5ea1d800, 0x000928 }, /* FRECPE_s */
++    { 0xffbffc00, 0x5ea1f800, 0x000128 }, /* FRECPX_s */
++    { 0xffbffc00, 0x7ea1d800, 0x000928 }, /* FRSQRTE_s */
++    { 0xffbffc00, 0x5e21d800, 0x000128 }, /* SCVTF_f */
++    { 0xffbffc00, 0x7e21d800, 0x000128 }, /* UCVTF_f */
++    { 0xffbffc00, 0x5e21a800, 0x000128 }, /* FCVTNS_f */
++    { 0xffbffc00, 0x7e21a800, 0x000128 }, /* FCVTNU_f */
++    { 0xffbffc00, 0x5ea1a800, 0x000128 }, /* FCVTPS_f */
++    { 0xffbffc00, 0x7ea1a800, 0x000128 }, /* FCVTPU_f */
++    { 0xffbffc00, 0x5e21b800, 0x000128 }, /* FCVTMS_f */
++    { 0xffbffc00, 0x7e21b800, 0x000128 }, /* FCVTMU_f */
++    { 0xffbffc00, 0x5ea1b800, 0x000128 }, /* FCVTZS_f */
++    { 0xffbffc00, 0x7ea1b800, 0x000128 }, /* FCVTZU_f */
++    { 0xffbffc00, 0x5e21c800, 0x000128 }, /* FCVTAS_f */
++    { 0xffbffc00, 0x7e21c800, 0x000128 }, /* FCVTAU_f */
++    { 0xfffffc00, 0x7e616800, 0x000128 }, /* FCVTXN_s */
++    { 0xffc0f400, 0x5f809000, 0x000168 }, /* FMUL_si_s */
++    { 0xffe0f400, 0x5fc09000, 0x000168 }, /* FMUL_si_d */
++    { 0xffc0f400, 0x5f801000, 0x000178 }, /* FMLA_si_s */
++    { 0xffe0f400, 0x5fc01000, 0x000178 }, /* FMLA_si_d */
++    { 0xffc0f400, 0x5f805000, 0x000178 }, /* FMLS_si_s */
++    { 0xffe0f400, 0x5fc05000, 0x000178 }, /* FMLS_si_d */
++    { 0xffc0f400, 0x7f809000, 0x000168 }, /* FMULX_si_s */
++    { 0xffe0f400, 0x7fc09000, 0x000168 }, /* FMULX_si_d */
++    { 0xffe0fc00, 0x5f20e400, 0x000128 }, /* SCVTF_fixed_s */
++    { 0xffc0fc00, 0x5f40e400, 0x000128 }, /* SCVTF_fixed_d */
++    { 0xffe0fc00, 0x7f20e400, 0x000128 }, /* UCVTF_fixed_s */
++    { 0xffc0fc00, 0x7f40e400, 0x000128 }, /* UCVTF_fixed_d */
++    { 0xffe0fc00, 0x5f20fc00, 0x000128 }, /* FCVTZS_fixed_s */
++    { 0xffc0fc00, 0x5f40fc00, 0x000128 }, /* FCVTZS_fixed_d */
++    { 0xffe0fc00, 0x7f20fc00, 0x000128 }, /* FCVTZU_fixed_s */
++    { 0xffc0fc00, 0x7f40fc00, 0x000128 }, /* FCVTZU_fixed_d */
++    { 0xbfa0fc00, 0x0e20c400, 0x000268 }, /* FMAXNM_v */
++    { 0xbfa0fc00, 0x0e20cc00, 0x000278 }, /* FMLA_v */
++    { 0xbfa0fc00, 0x0e20d400, 0x000268 }, /* FADD_v */
++    { 0xbfa0fc00, 0x0e20dc00, 0x000268 }, /* FMULX_v */
++    { 0xbfa0fc00, 0x0e20e400, 0x000268 }, /* FCMEQ_v */
++    { 0xbfa0fc00, 0x0e20f400, 0x000268 }, /* FMAX_v */
++    { 0xbfa0fc00, 0x0e20fc00, 0x000268 }, /* FRECPS_v */
++    { 0xbfa0fc00, 0x0ea0c400, 0x000268 }, /* FMINNM_v */
++    { 0xbfa0fc00, 0x0ea0cc00, 0x000278 }, /* FMLS_v */
++    { 0xbfa0fc00, 0x0ea0d400, 0x000268 }, /* FSUB_v */
++    { 0xbfa0fc00, 0x0ea0f400, 0x000268 }, /* FMIN_v */
++    { 0xbfa0fc00, 0x0ea0fc00, 0x000268 }, /* FRSQRTS_v */
++    { 0xbfa0fc00, 0x2e20c400, 0x000268 }, /* FMAXNMP_v */
++    { 0xbfa0fc00, 0x2e20d400, 0x000268 }, /* FADDP_v */
++    { 0xbfa0fc00, 0x2e20dc00, 0x000268 }, /* FMUL_v */
++    { 0xbfa0fc00, 0x2e20e400, 0x000268 }, /* FCMGE_v */
++    { 0xbfa0fc00, 0x2e20ec00, 0x000268 }, /* FACGE_v */
++    { 0xbfa0fc00, 0x2e20f400, 0x000268 }, /* FMAXP_v */
++    { 0xbfa0fc00, 0x2e20fc00, 0x000268 }, /* FDIV_v */
++    { 0xbfa0fc00, 0x2ea0c400, 0x000268 }, /* FMINNMP_v */
++    { 0xbfa0fc00, 0x2ea0d400, 0x000268 }, /* FABD_v */
++    { 0xbfa0fc00, 0x2ea0e400, 0x000268 }, /* FCMGT_v */
++    { 0xbfa0fc00, 0x2ea0ec00, 0x000268 }, /* FACGT_v */
++    { 0xbfa0fc00, 0x2ea0f400, 0x000268 }, /* FMINP_v */
++    { 0xbfc0f400, 0x0f809000, 0x000068 }, /* FMUL_vi_s */
++    { 0xbfe0f400, 0x0fc09000, 0x000468 }, /* FMUL_vi_d */
++    { 0xbfc0f400, 0x0f801000, 0x000078 }, /* FMLA_vi_s */
++    { 0xbfe0f400, 0x0fc01000, 0x000478 }, /* FMLA_vi_d */
++    { 0xbfc0f400, 0x0f805000, 0x000078 }, /* FMLS_vi_s */
++    { 0xbfe0f400, 0x0fc05000, 0x000478 }, /* FMLS_vi_d */
++    { 0xbfc0f400, 0x2f809000, 0x000068 }, /* FMULX_vi_s */
++    { 0xbfe0f400, 0x2fc09000, 0x000468 }, /* FMULX_vi_d */
++    { 0xbfbffc00, 0x2ea1f800, 0x000228 }, /* FSQRT_v */
++    { 0xbfbffc00, 0x0e218800, 0x000228 }, /* FRINTN_v */
++    { 0xbfbffc00, 0x0e219800, 0x000228 }, /* FRINTM_v */
++    { 0xbfbffc00, 0x0ea18800, 0x000228 }, /* FRINTP_v */
++    { 0xbfbffc00, 0x0ea19800, 0x000228 }, /* FRINTZ_v */
++    { 0xbfbffc00, 0x2e218800, 0x000228 }, /* FRINTA_v */
++    { 0xbfbffc00, 0x2e219800, 0x000228 }, /* FRINTX_v */
++    { 0xbfbffc00, 0x2ea19800, 0x000228 }, /* FRINTI_v */
++    { 0xbfbffc00, 0x0e21d800, 0x000228 }, /* SCVTF_vi */
++    { 0xbfbffc00, 0x2e21d800, 0x000228 }, /* UCVTF_vi */
++    { 0xbfbffc00, 0x0e21a800, 0x000228 }, /* FCVTNS_vi */
++    { 0xbfbffc00, 0x2e21a800, 0x000228 }, /* FCVTNU_vi */
++    { 0xbfbffc00, 0x0ea1a800, 0x000228 }, /* FCVTPS_vi */
++    { 0xbfbffc00, 0x2ea1a800, 0x000228 }, /* FCVTPU_vi */
++    { 0xbfbffc00, 0x0e21b800, 0x000228 }, /* FCVTMS_vi */
++    { 0xbfbffc00, 0x2e21b800, 0x000228 }, /* FCVTMU_vi */
++    { 0xbfbffc00, 0x0ea1b800, 0x000228 }, /* FCVTZS_vi */
++    { 0xbfbffc00, 0x2ea1b800, 0x000228 }, /* FCVTZU_vi */
++    { 0xbfbffc00, 0x0e21c800, 0x000228 }, /* FCVTAS_vi */
++    { 0xbfbffc00, 0x2e21c800, 0x000228 }, /* FCVTAU_vi */
++    { 0xbfbffc00, 0x0ea0c800, 0x000228 }, /* FCMGT0_v */
++    { 0xbfbffc00, 0x2ea0c800, 0x000228 }, /* FCMGE0_v */
++    { 0xbfbffc00, 0x0ea0d800, 0x000228 }, /* FCMEQ0_v */
++    { 0xbfbffc00, 0x2ea0d800, 0x000228 }, /* FCMLE0_v */
++    { 0xbfbffc00, 0x0ea0e800, 0x000228 }, /* FCMLT0_v */
++    { 0xbfbffc00, 0x0ea1d800, 0x000a28 }, /* FRECPE_v */
++    { 0xbfbffc00, 0x2ea1d800, 0x000a28 }, /* FRSQRTE_v */
++    { 0xbfbffc00, 0x0e216800, 0x000038 }, /* FCVTN_v */
++    { 0xbfbffc00, 0x0e217800, 0x000028 }, /* FCVTL_v */
++    { 0xbffffc00, 0x2e616800, 0x000038 }, /* FCVTXN_v */
++    { 0xfffffc00, 0x6e30c800, 0x000128 }, /* FMAXNMV_s */
++    { 0xfffffc00, 0x6eb0c800, 0x000128 }, /* FMINNMV_s */
++    { 0xfffffc00, 0x6e30f800, 0x000128 }, /* FMAXV_s */
++    { 0xfffffc00, 0x6eb0f800, 0x000128 }, /* FMINV_s */
++    { 0xbfe0fc00, 0x0f20e400, 0x000028 }, /* SCVTF_vf_s */
++    { 0xbfc0fc00, 0x0f40e400, 0x000428 }, /* SCVTF_vf_d */
++    { 0xbfe0fc00, 0x2f20e400, 0x000028 }, /* UCVTF_vf_s */
++    { 0xbfc0fc00, 0x2f40e400, 0x000428 }, /* UCVTF_vf_d */
++    { 0xbfe0fc00, 0x0f20fc00, 0x000028 }, /* FCVTZS_vf_s */
++    { 0xbfc0fc00, 0x0f40fc00, 0x000428 }, /* FCVTZS_vf_d */
++    { 0xbfe0fc00, 0x2f20fc00, 0x000028 }, /* FCVTZU_vf_s */
++    { 0xbfc0fc00, 0x2f40fc00, 0x000428 }, /* FCVTZU_vf_d */
++    { 0x7fbffc00, 0x1e220000, 0x00010d }, /* SCVTF_g */
++    { 0x7fbffc00, 0x1e230000, 0x00010d }, /* UCVTF_g */
++    { 0x7fbffc00, 0x1e200000, 0x000023 }, /* FCVTNS_g */
++    { 0x7fbffc00, 0x1e210000, 0x000023 }, /* FCVTNU_g */
++    { 0x7fbffc00, 0x1e280000, 0x000023 }, /* FCVTPS_g */
++    { 0x7fbffc00, 0x1e290000, 0x000023 }, /* FCVTPU_g */
++    { 0x7fbffc00, 0x1e300000, 0x000023 }, /* FCVTMS_g */
++    { 0x7fbffc00, 0x1e310000, 0x000023 }, /* FCVTMU_g */
++    { 0x7fbffc00, 0x1e380000, 0x000023 }, /* FCVTZS_g */
++    { 0x7fbffc00, 0x1e390000, 0x000023 }, /* FCVTZU_g */
++    { 0x7fbffc00, 0x1e240000, 0x000023 }, /* FCVTAS_g */
++    { 0x7fbffc00, 0x1e250000, 0x000023 }, /* FCVTAU_g */
++    { 0xffbf8000, 0x1e028000, 0x00010d }, /* SCVTF_gf32 */
++    { 0xffbf0000, 0x9e020000, 0x00010d }, /* SCVTF_gf64 */
++    { 0xffbf8000, 0x1e038000, 0x00010d }, /* UCVTF_gf32 */
++    { 0xffbf0000, 0x9e030000, 0x00010d }, /* UCVTF_gf64 */
++    { 0xffbf8000, 0x1e188000, 0x000023 }, /* FCVTZS_gf32 */
++    { 0xffbf0000, 0x9e180000, 0x000023 }, /* FCVTZS_gf64 */
++    { 0xffbf8000, 0x1e198000, 0x000023 }, /* FCVTZU_gf32 */
++    { 0xffbf0000, 0x9e190000, 0x000023 }, /* FCVTZU_gf64 */
++    { 0xfffffc00, 0x1e7e0000, 0x010024 }, /* FJCVTZS */
++    { 0xfffffc00, 0x4e284800, 0x020038 }, /* AESE */
++    { 0xfffffc00, 0x4e285800, 0x020038 }, /* AESD */
++    { 0xfffffc00, 0x4e286800, 0x020028 }, /* AESMC */
++    { 0xfffffc00, 0x4e287800, 0x020028 }, /* AESIMC */
++    { 0xffe0fc00, 0x5e000000, 0x030078 }, /* SHA1C */
++    { 0xffe0fc00, 0x5e001000, 0x030078 }, /* SHA1P */
++    { 0xffe0fc00, 0x5e002000, 0x030078 }, /* SHA1M */
++    { 0xffe0fc00, 0x5e003000, 0x030078 }, /* SHA1SU0 */
++    { 0xffe0fc00, 0x5e004000, 0x040078 }, /* SHA256H */
++    { 0xffe0fc00, 0x5e005000, 0x040078 }, /* SHA256H2 */
++    { 0xffe0fc00, 0x5e006000, 0x040078 }, /* SHA256SU1 */
++    { 0xfffffc00, 0x5e280800, 0x030028 }, /* SHA1H */
++    { 0xfffffc00, 0x5e281800, 0x030038 }, /* SHA1SU1 */
++    { 0xfffffc00, 0x5e282800, 0x040038 }, /* SHA256SU0 */
++    { 0xbfe0fc00, 0x0ee0e000, 0x050068 }, /* PMULL_p64 */
++    { 0xbfe0fc00, 0x0e20e000, 0x000068 }, /* PMULL_p8 */
++    { 0xbfe08c00, 0x0e000000, 0x001078 }, /* TBL_TBX */
+diff --git a/target/arm/tcg/host-vfp.c b/target/arm/tcg/host-vfp.c
+new file mode 100644
+index 0000000..2089038
+--- /dev/null
++++ b/target/arm/tcg/host-vfp.c
+@@ -0,0 +1,190 @@
++/*
++ * AArch64 guest FP/AdvSIMD instructions run on an AArch64 host (iDeck):
++ * host FPCR/FPSR management.  See host-vfp.h.
++ *
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ */
++
++#include "qemu/osdep.h"
++#include "cpu.h"
++#include "internals.h"
++#include "fpu/softfloat.h"
++#include "tcg/tcg-host-vfp.h"
++#include "host-vfp.h"
++
++#ifdef ARM_HOST_VFP
++
++#include "host/cpuinfo.h"
++
++#ifdef CONFIG_DARWIN
++#include <sys/sysctl.h>
++#else
++#include "elf.h"
++#ifndef HWCAP_SHA1
++#define HWCAP_SHA1  (1 << 5)
++#endif
++#ifndef HWCAP_SHA2
++#define HWCAP_SHA2  (1 << 6)
++#endif
++#ifndef HWCAP_JSCVT
++#define HWCAP_JSCVT (1 << 13)
++#endif
++#endif
++
++/* Cumulative exception bits: IOC, DZC, OFC, UFC, IXC, IDC. */
++#define HOST_FPSR_CEXC  0x9fu
++
++static inline uint64_t host_fpcr_read(void)
++{
++    uint64_t v;
++    asm volatile("mrs %0, fpcr" : "=r"(v));
++    return v;
++}
++
++static inline void host_fpcr_write(uint64_t v)
++{
++    asm volatile("msr fpcr, %0" : : "r"(v));
++}
++
++static inline uint64_t host_fpsr_read(void)
++{
++    uint64_t v;
++    asm volatile("mrs %0, fpsr" : "=r"(v));
++    return v;
++}
++
++static inline void host_fpsr_write(uint64_t v)
++{
++    asm volatile("msr fpsr, %0" : : "r"(v));
++}
++
++/* Guest FPCR bits the host FPCR takes over: every ARMv8.0 CPU has them. */
++#define HOST_FPCR_MASK  (FPCR_RMODE_MASK | FPCR_FZ | FPCR_DN | FPCR_AHP)
++
++static struct {
++    uint32_t feats;
++} host;
++
++/* The guest whose FP environment the host registers of this thread hold. */
++static __thread CPUARMState *live_env;
++static __thread uint64_t saved_fpcr, saved_fpsr;
++
++#ifdef CONFIG_DARWIN
++static bool host_sysctl_bool(const char *name)
++{
++    int val = 0;
++    size_t len = sizeof(val);
++
++    return sysctlbyname(name, &val, &len, NULL, 0) == 0 && val != 0;
++}
++#endif
++
++static void host_probe(void)
++{
++    host.feats = 1u << ARM_HOST_VFP_FEAT_NONE;
++    if (cpuinfo & CPUINFO_AES) {
++        host.feats |= 1u << ARM_HOST_VFP_FEAT_AES;
++    }
++    if (cpuinfo & CPUINFO_PMULL) {
++        host.feats |= 1u << ARM_HOST_VFP_FEAT_PMULL;
++    }
++#ifdef CONFIG_DARWIN
++    if (host_sysctl_bool("hw.optional.arm.FEAT_SHA1")) {
++        host.feats |= 1u << ARM_HOST_VFP_FEAT_SHA1;
++    }
++    if (host_sysctl_bool("hw.optional.arm.FEAT_SHA256")) {
++        host.feats |= 1u << ARM_HOST_VFP_FEAT_SHA256;
++    }
++    if (host_sysctl_bool("hw.optional.arm.FEAT_JSCVT")) {
++        host.feats |= 1u << ARM_HOST_VFP_FEAT_JSCVT;
++    }
++#else
++    {
++        unsigned long hwcap = qemu_getauxval(AT_HWCAP);
++
++        if (hwcap & HWCAP_SHA1) {
++            host.feats |= 1u << ARM_HOST_VFP_FEAT_SHA1;
++        }
++        if (hwcap & HWCAP_SHA2) {
++            host.feats |= 1u << ARM_HOST_VFP_FEAT_SHA256;
++        }
++        if (hwcap & HWCAP_JSCVT) {
++            host.feats |= 1u << ARM_HOST_VFP_FEAT_JSCVT;
++        }
++    }
++#endif
++}
++
++static void host_probe_once(void)
++{
++    static gsize once;
++
++    if (g_once_init_enter(&once)) {
++        host_probe();
++        g_once_init_leave(&once, 1);
++    }
++}
++
++bool arm_host_vfp_available(void)
++{
++    return tcg_host_vfp_supported();
++}
++
++bool arm_host_vfp_has_feat(unsigned feat)
++{
++    host_probe_once();
++    return host.feats & (1u << feat);
++}
++
++static void host_fpcr_apply(CPUARMState *env)
++{
++    uint64_t guest = env->vfp.fpcr & HOST_FPCR_MASK;
++
++    host_fpcr_write((saved_fpcr & ~(uint64_t)HOST_FPCR_MASK) | guest);
++    /* The host-FPU fast path of softfloat assumes round-to-nearest. */
++    float_host_rounding_altered = (guest & FPCR_RMODE_MASK) != 0;
++}
++
++void arm_host_vfp_exec_enter(CPUARMState *env)
++{
++    saved_fpcr = host_fpcr_read();
++    saved_fpsr = host_fpsr_read();
++    live_env = env;
++    host_fpsr_write(0);
++    host_fpcr_apply(env);
++}
++
++void arm_host_vfp_exec_exit(CPUARMState *env)
++{
++    if (live_env != env) {
++        return;
++    }
++    env->vfp.fpsr |= host_fpsr_read() & HOST_FPSR_CEXC;
++    live_env = NULL;
++    float_host_rounding_altered = false;
++    host_fpsr_write(saved_fpsr);
++    host_fpcr_write(saved_fpcr);
++}
++
++void arm_host_vfp_fpcr_changed(CPUARMState *env)
++{
++    if (live_env == env) {
++        host_fpcr_apply(env);
++    }
++}
++
++void arm_host_vfp_sync_fpsr(CPUARMState *env)
++{
++    if (live_env == env) {
++        env->vfp.fpsr |= host_fpsr_read() & HOST_FPSR_CEXC;
++    }
++}
++
++void arm_host_vfp_reset_fpsr(CPUARMState *env)
++{
++    if (live_env == env) {
++        host_fpsr_write(0);
++    }
++}
++
++#endif /* ARM_HOST_VFP */
+diff --git a/target/arm/tcg/meson.build b/target/arm/tcg/meson.build
+index dd12cce..5b18544 100644
+--- a/target/arm/tcg/meson.build
++++ b/target/arm/tcg/meson.build
+@@ -51,6 +51,7 @@ arm_ss.add(when: 'TARGET_AARCH64', if_true: files(
+   'translate-sve.c',
+   'translate-sme.c',
+   'helper-a64.c',
++  'host-vfp.c',
+   'mte_helper.c',
+   'pauth_helper.c',
+   'sme_helper.c',
+diff --git a/target/arm/tcg/translate-a64.c b/target/arm/tcg/translate-a64.c
+index 05cdd2b..b8625f3 100644
+--- a/target/arm/tcg/translate-a64.c
++++ b/target/arm/tcg/translate-a64.c
+@@ -25,6 +25,8 @@
+ #include "arm_ldst.h"
+ #include "semihosting/semihost.h"
+ #include "cpregs.h"
++#include "host-vfp.h"
++#include "tcg/tcg-host-vfp.h"
+ 
+ static TCGv_i64 cpu_X[32];
+ static TCGv_i64 cpu_pc;
+@@ -10171,6 +10173,13 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
+     dc->nv2_mem_be = EX_TBFLAG_A64(tb_flags, NV2_MEM_BE);
+     dc->fpcr_ah = EX_TBFLAG_A64(tb_flags, AH);
+     dc->fpcr_nep = EX_TBFLAG_A64(tb_flags, NEP);
++    /*
++     * Host instructions write 128-bit registers: with SVE the rest of
++     * the Z register would have to be cleared, and SME streaming mode
++     * makes most of these instructions illegal.
++     */
++    dc->host_vfp = arm_cpu->host_vfp && dc->vl == 16 &&
++                   !dc_isar_feature(aa64_sme, dc);
+     dc->vec_len = 0;
+     dc->vec_stride = 0;
+     dc->cp_regs = arm_cpu->cp_regs;
+@@ -10230,6 +10239,15 @@ static void aarch64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
+     dc->insn_start_updated = false;
+ }
+ 
++#ifdef ARM_HOST_VFP
++#include "host-vfp-a64.c.inc"
++#else
++static bool host_vfp_try(DisasContext *s, uint32_t insn)
++{
++    return false;
++}
++#endif
++
+ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+ {
+     DisasContext *s = container_of(dcbase, DisasContext, base);
+@@ -10316,9 +10334,11 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+         disas_sme_fa64(s, insn);
+     }
+ 
+-    if (!disas_a64(s, insn) &&
+-        !disas_sme(s, insn) &&
+-        !disas_sve(s, insn)) {
++    if (s->host_vfp && host_vfp_try(s, insn)) {
++        /* Emitted as a host instruction. */
++    } else if (!disas_a64(s, insn) &&
++               !disas_sme(s, insn) &&
++               !disas_sve(s, insn)) {
+         unallocated_encoding(s);
+     }
+ 
+diff --git a/target/arm/tcg/translate.h b/target/arm/tcg/translate.h
+index 53e485d..cf78135 100644
+--- a/target/arm/tcg/translate.h
++++ b/target/arm/tcg/translate.h
+@@ -163,6 +163,8 @@ typedef struct DisasContext {
+     bool fpcr_ah;
+     /* True if FPCR.NEP is 1 (FEAT_AFP scalar upper-element result handling) */
+     bool fpcr_nep;
++    /* True if listed FP/AdvSIMD insns are emitted as host insns (x-host-vfp) */
++    bool host_vfp;
+     /*
+      * >= 0, a copy of PSTATE.BTYPE, which will be 0 without v8.5-BTI.
+      *  < 0, set by the current instruction.
+diff --git a/target/arm/vfp_fpscr.c b/target/arm/vfp_fpscr.c
+index 92ea60e..2e9064a 100644
+--- a/target/arm/vfp_fpscr.c
++++ b/target/arm/vfp_fpscr.c
+@@ -21,6 +21,7 @@
+ #include "cpu.h"
+ #include "internals.h"
+ #include "cpu-features.h"
++#include "host-vfp.h"
+ 
+ uint32_t vfp_get_fpcr(CPUARMState *env)
+ {
+@@ -39,9 +40,11 @@ uint32_t vfp_get_fpcr(CPUARMState *env)
+ 
+ uint32_t vfp_get_fpsr(CPUARMState *env)
+ {
+-    uint32_t fpsr = env->vfp.fpsr;
++    uint32_t fpsr;
+     uint32_t i;
+ 
++    arm_host_vfp_sync_fpsr(env);
++    fpsr = env->vfp.fpsr;
+     fpsr |= vfp_get_fpsr_from_host(env);
+ 
+     i = env->vfp.qc[0] | env->vfp.qc[1] | env->vfp.qc[2] | env->vfp.qc[3];
+@@ -84,6 +87,7 @@ void vfp_set_fpsr(CPUARMState *env, uint32_t val)
+     val &= FPSR_NZCV_MASK | FPSR_CEXC_MASK;
+     env->vfp.fpsr = val;
+     vfp_clear_float_status_exc_flags(env);
++    arm_host_vfp_reset_fpsr(env);
+ }
+ 
+ static void vfp_set_fpcr_masked(CPUARMState *env, uint32_t val, uint32_t mask)
+@@ -141,6 +145,7 @@ static void vfp_set_fpcr_masked(CPUARMState *env, uint32_t val, uint32_t mask)
+         FPCR_EBF | FPCR_FIZ | FPCR_AH | FPCR_NEP;
+     env->vfp.fpcr &= ~mask;
+     env->vfp.fpcr |= val;
++    arm_host_vfp_fpcr_changed(env);
+ }
+ 
+ void vfp_set_fpcr(CPUARMState *env, uint32_t val)
+diff --git a/tcg/aarch64/tcg-target-has.h b/tcg/aarch64/tcg-target-has.h
+index 39f01c1..3048e4a 100644
+--- a/tcg/aarch64/tcg-target-has.h
++++ b/tcg/aarch64/tcg-target-has.h
+@@ -110,6 +110,9 @@
+ #define TCG_TARGET_HAS_cmpsel_vec       0
+ #define TCG_TARGET_HAS_tst_vec          1
+ 
++/* INDEX_op_host_vfp: see tcg/tcg-host-vfp.h. */
++#define TCG_TARGET_HAS_host_vfp         1
++
+ #define TCG_TARGET_extract_valid(type, ofs, len)   1
+ #define TCG_TARGET_sextract_valid(type, ofs, len)  1
+ #define TCG_TARGET_deposit_valid(type, ofs, len)   1
+diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
+index 4645242..9cc204a 100644
+--- a/tcg/aarch64/tcg-target.c.inc
++++ b/tcg/aarch64/tcg-target.c.inc
+@@ -11,6 +11,7 @@
+  */
+ 
+ #include "qemu/bitops.h"
++#include "tcg/tcg-host-vfp.h"
+ 
+ /* Used for function call generation. */
+ #define TCG_REG_CALL_STACK              TCG_REG_SP
+@@ -1255,6 +1256,78 @@ static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
+     return true;
+ }
+ 
++static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret,
++                       TCGReg base, intptr_t ofs);
++static void tcg_out_st(TCGContext *s, TCGType type, TCGReg src,
++                       TCGReg base, intptr_t ofs);
++
++/*
++ * INDEX_op_host_vfp: run one host FP/AdvSIMD instruction on guest
++ * registers in env.  Only reserved registers are used (the slot
++ * registers and TMP0), so no register allocation is involved; NZCV is
++ * never live between TCG ops on this host.
++ */
++QEMU_BUILD_BUG_ON(TCG_HVFP_GPR != TCG_REG_TMP0);
++QEMU_BUILD_BUG_ON(TCG_REG_V0 + TCG_HVFP_VREG(TCG_HVFP_NSLOTS - 1)
++                  >= TCG_VEC_TMP0);
++
++static void tcg_out_host_vfp(TCGContext *s, const TCGArg *args)
++{
++    const uint32_t mrs_nzcv = 0xd53b4200 | TCG_REG_TMP0;
++    const uint32_t msr_nzcv = 0xd51b4200 | TCG_REG_TMP0;
++    uint32_t insn = args[0];
++    uint64_t ctl = args[1];
++    unsigned kind = ctl & 7;
++    intptr_t xchg = ctl >> 40;
++
++    /*
++     * The exchange words must be reachable with a scaled offset: TMP0
++     * carries data here and cannot also hold a large offset.
++     */
++    tcg_debug_assert(kind == TCG_HVFP_VEC ||
++                     (xchg > 0 && xchg + 8 <= 0x7ff8 && !(xchg & 7)));
++
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        uint32_t l = args[2 + i];
++        if (l & 1) {
++            tcg_out_ld(s, TCG_TYPE_V128,
++                       TCG_REG_V0 + TCG_HVFP_VREG((l >> 1) & 7),
++                       TCG_AREG0, l >> 8);
++        }
++    }
++    if (kind == TCG_HVFP_GPR_IN || kind == TCG_HVFP_FLAGS_INOUT) {
++        tcg_out_ld(s, TCG_TYPE_I64, TCG_REG_TMP0, TCG_AREG0, xchg);
++        if (kind == TCG_HVFP_FLAGS_INOUT) {
++            tcg_out32(s, msr_nzcv);
++        }
++    }
++
++    tcg_out32(s, insn);
++
++    switch (kind) {
++    case TCG_HVFP_FLAGS_OUT:
++    case TCG_HVFP_FLAGS_INOUT:
++        tcg_out32(s, mrs_nzcv);
++        tcg_out_st(s, TCG_TYPE_I64, TCG_REG_TMP0, TCG_AREG0, xchg);
++        break;
++    case TCG_HVFP_GPR_OUT:
++        tcg_out_st(s, TCG_TYPE_I64, TCG_REG_TMP0, TCG_AREG0, xchg);
++        break;
++    case TCG_HVFP_GPR_OUT_FLAGS:
++        tcg_out_st(s, TCG_TYPE_I64, TCG_REG_TMP0, TCG_AREG0, xchg);
++        tcg_out32(s, mrs_nzcv);
++        tcg_out_st(s, TCG_TYPE_I64, TCG_REG_TMP0, TCG_AREG0, xchg + 8);
++        break;
++    default:
++        break;
++    }
++    if (ctl & 8) {
++        tcg_out_st(s, TCG_TYPE_V128,
++                   TCG_REG_V0 + TCG_HVFP_VREG((ctl >> 4) & 7),
++                   TCG_AREG0, (ctl >> 8) & 0xffffffff);
++    }
++}
++
+ static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret,
+                        TCGReg base, intptr_t ofs)
+ {
+@@ -3182,6 +3255,11 @@ static void tcg_target_init(TCGContext *s)
+     tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP1);
+     tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP2);
+     tcg_regset_set_reg(s->reserved_regs, TCG_VEC_TMP0);
++    /* Slot registers of INDEX_op_host_vfp. */
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        tcg_regset_set_reg(s->reserved_regs,
++                           TCG_REG_V0 + TCG_HVFP_VREG(i));
++    }
+ }
+ 
+ /* Saving pairs: (X19, X20) .. (X27, X28), (X29(fp), X30(lr)).  */
+diff --git a/tcg/optimize.c b/tcg/optimize.c
+index f019cd1..ccd6156 100644
+--- a/tcg/optimize.c
++++ b/tcg/optimize.c
+@@ -2979,6 +2979,11 @@ void tcg_optimize(TCGContext *s)
+         case INDEX_op_mb:
+             done = fold_mb(&ctx, op);
+             break;
++        case INDEX_op_host_vfp:
++            /* Reads and writes guest registers in env directly. */
++            remove_mem_copy_all(&ctx);
++            done = finish_folding(&ctx, op);
++            break;
+         CASE_OP_32_64_VEC(mov):
+             done = fold_mov(&ctx, op);
+             break;
+diff --git a/tcg/tcg-op.c b/tcg/tcg-op.c
+index e58b3fe..c6f133c 100644
+--- a/tcg/tcg-op.c
++++ b/tcg/tcg-op.c
+@@ -30,6 +30,7 @@
+ #include "exec/plugin-gen.h"
+ #include "tcg-internal.h"
+ #include "tcg-has.h"
++#include "tcg/tcg-host-vfp.h"
+ 
+ /*
+  * Encourage the compiler to tail-call to a function, rather than inlining.
+@@ -312,6 +313,27 @@ void tcg_gen_br(TCGLabel *l)
+     add_as_label_use(l, tcg_gen_op1(INDEX_op_br, 0, label_arg(l)));
+ }
+ 
++bool tcg_host_vfp_supported(void)
++{
++#ifdef TCG_TARGET_HAS_host_vfp
++    return true;
++#else
++    return false;
++#endif
++}
++
++void tcg_gen_host_vfp(uint32_t insn, uint64_t ctl,
++                      const uint32_t loads[TCG_HVFP_NSLOTS])
++{
++    TCGOp *op = tcg_emit_op(INDEX_op_host_vfp, 2 + TCG_HVFP_NSLOTS);
++
++    op->args[0] = insn;
++    op->args[1] = ctl;
++    for (int i = 0; i < TCG_HVFP_NSLOTS; i++) {
++        op->args[2 + i] = loads[i];
++    }
++}
++
+ void tcg_gen_mb(TCGBar mb_type)
+ {
+ #ifdef CONFIG_USER_ONLY
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+index fc933b1..30086c3 100644
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -2158,6 +2158,13 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
+     case INDEX_op_qemu_st_i64:
+         return true;
+ 
++    case INDEX_op_host_vfp:
++#ifdef TCG_TARGET_HAS_host_vfp
++        return true;
++#else
++        return false;
++#endif
++
+     case INDEX_op_qemu_st8_i32:
+         return TCG_TARGET_HAS_qemu_st8_i32;
+ 
+@@ -6461,6 +6468,11 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
+         case INDEX_op_goto_tb:
+             tcg_out_goto_tb(s, op->args[0]);
+             break;
++#ifdef TCG_TARGET_HAS_host_vfp
++        case INDEX_op_host_vfp:
++            tcg_out_host_vfp(s, op->args);
++            break;
++#endif
+         case INDEX_op_dup2_vec:
+             if (tcg_reg_alloc_dup2(s, op)) {
+                 break;
