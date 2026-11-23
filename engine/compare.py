@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Compare fpcheck digests and benchmark results between environments.
 
-    compare.py --native out/native --off out/vfp-off --on out/vfp-on [--md FILE]
+    compare.py --native out/native --off out/vfp-off --on out/vfp-on \
+        [--also NAME:DIR ...] [--md FILE]
 
 Each directory holds fpcheck.json and bench.json (run_guest_tests.py for
 the guests; the same binaries run directly on the runner for "native").
 
-Exit status 1 if, with host VFP on, any pattern's register results differ
-from real hardware, any pattern raised SIGILL, or the mixed sequences
-differ.  Differences of the unpatched path (QEMU's own softfloat against
+Exit status 1 if, with host VFP on (--on and every --also), any pattern's
+register results differ from real hardware, any pattern raised SIGILL, or
+the mixed sequences differ.  Differences of the unpatched path (QEMU's own softfloat against
 hardware) are reported, not failed.  FPSR flag differences are reported
 and fail only with --strict-flags.
 """
@@ -78,8 +79,11 @@ def bench_table(rows: dict[str, dict | None]) -> list[str]:
         return None
 
     labels = list(rows)
-    lines = ["| benchmark | unit | " + " | ".join(labels) + " | on / off |",
-             "|---|---|" + "---:|" * (len(labels) + 1)]
+    # A ratio against vfp-off for every guest configuration after it.
+    ratio_of = [label for label in labels if label not in ("native", "vfp-off")]
+    lines = ["| benchmark | unit | " + " | ".join(labels) + " | "
+             + " | ".join(f"{label} / off" for label in ratio_of) + " |",
+             "|---|---|" + "---:|" * (len(labels) + len(ratio_of))]
     for name in names:
         unit = ""
         for data in rows.values():
@@ -90,9 +94,12 @@ def bench_table(rows: dict[str, dict | None]) -> list[str]:
         for label in labels:
             v = value(rows[label], name)
             cells.append("n/a" if v is None else f"{v:,.2f}")
-        off, on = value(rows.get("vfp-off"), name), value(rows.get("vfp-on"), name)
-        ratio = "" if not off or on is None else f"{on / off:.2f}x"
-        lines.append(f"| {name} | {unit} | " + " | ".join(cells) + f" | {ratio} |")
+        off = value(rows.get("vfp-off"), name)
+        ratios = []
+        for label in ratio_of:
+            v = value(rows[label], name)
+            ratios.append("" if not off or v is None else f"{v / off:.2f}x")
+        lines.append(f"| {name} | {unit} | " + " | ".join(cells) + " | " + " | ".join(ratios) + " |")
     return lines
 
 
@@ -101,6 +108,8 @@ def main() -> int:
     ap.add_argument("--native", required=True, type=Path)
     ap.add_argument("--off", required=True, type=Path)
     ap.add_argument("--on", required=True, type=Path)
+    ap.add_argument("--also", action="append", default=[], metavar="NAME:DIR",
+                    help="a further guest configuration, checked like --on")
     ap.add_argument("--md", type=Path, help="also append the report to this file")
     ap.add_argument("--strict-flags", action="store_true")
     args = ap.parse_args()
@@ -116,8 +125,13 @@ def main() -> int:
         out.append("")
         failed = True
 
-    for label, d, gate in (("QEMU as shipped by UTM (helpers)", args.off, False),
-                           ("QEMU with host VFP", args.on, True)):
+    also = []
+    for spec in args.also:
+        name, _, d = spec.partition(":")
+        also.append((name, Path(d)))
+    for label, d, gate in [("QEMU as shipped by UTM (helpers)", args.off, False),
+                           ("QEMU with host VFP", args.on, True)] + \
+                          [(f"QEMU, {name}", d, True) for name, d in also]:
         guest = load(d, "fpcheck.json")
         if not guest or not guest.get("patterns"):
             out.append(f"### {label}: no result")
@@ -133,11 +147,14 @@ def main() -> int:
 
     out.append("## Benchmarks (same binary; guest numbers are 4 vCPUs under TCG)")
     out.append("")
-    out += bench_table({
+    rows = {
         "native": load(args.native, "bench.json"),
         "vfp-off": load(args.off, "bench.json"),
         "vfp-on": load(args.on, "bench.json"),
-    })
+    }
+    for name, d in also:
+        rows[name] = load(d, "bench.json")
+    out += bench_table(rows)
     out.append("")
     out.append("**Result: " + ("FAILED" if failed else "host VFP matches hardware") + "**")
     text = "\n".join(out) + "\n"

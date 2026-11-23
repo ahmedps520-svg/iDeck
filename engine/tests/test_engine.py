@@ -189,6 +189,25 @@ class Compare(unittest.TestCase):
                 "vfp-on": {"results": [{"name": "fp", "unit": "u", "value": 40.0, "ok": 1}]}}
         table = "\n".join(compare.bench_table(rows))
         self.assertIn("| fp | u | 100.00 | 10.00 | 40.00 | 4.00x |", table)
+        rows["vfp-asid"] = {"results": [{"name": "fp", "unit": "u", "value": 50.0, "ok": 1}]}
+        table = "\n".join(compare.bench_table(rows))
+        self.assertIn("| fp | u | 100.00 | 10.00 | 40.00 | 50.00 | 4.00x | 5.00x |", table)
+
+    def test_also_is_checked_like_on(self):
+        a = self.fp(A=["1", "2"])
+        b = self.fp(A=["9", "2"])
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            for name, data in (("native", a), ("off", a), ("on", a), ("extra", b)):
+                (d / name).mkdir()
+                (d / name / "fpcheck.json").write_text(json.dumps(data))
+            argv = sys.argv
+            sys.argv = ["compare.py", "--native", str(d / "native"), "--off", str(d / "off"),
+                        "--on", str(d / "on"), "--also", f"extra:{d / 'extra'}"]
+            try:
+                self.assertEqual(compare.main(), 1)
+            finally:
+                sys.argv = argv
 
 
 if __name__ == "__main__":

@@ -37,7 +37,9 @@
 #include <time.h>
 #include <unistd.h>
 #if defined(__linux__)
+#include <sched.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #endif
 #endif
 
@@ -441,6 +443,74 @@ static void bench_syscall(uint64_t calls) {
 #endif
 }
 
+/* ---- context switches ---------------------------------------------------- */
+
+/* Two processes on one CPU pass a byte back and forth through pipes, so
+   every read blocks and the kernel switches address space. With `pages` > 0
+   each side also touches that many pages of its own memory after it wakes:
+   what a switch costs a program that then goes on to use its memory. Under
+   QEMU's TCG a switch between address spaces empties the soft TLB. */
+static void bench_ctx_switch(const char* name, uint64_t rounds, int pages) {
+    result* r = add_result(name, "ns/switch");
+#if defined(__linux__)
+    int ab[2], ba[2];
+    if (pipe(ab) || pipe(ba)) {
+        snprintf(r->note, sizeof(r->note), "pipe failed");
+        return;
+    }
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(0, &one);
+    cpu_set_t before;
+    int had = sched_getaffinity(0, sizeof(before), &before) == 0;
+    sched_setaffinity(0, sizeof(one), &one);
+    const size_t page = 4096, len = (size_t)(pages > 0 ? pages : 1) * page;
+    pid_t child = fork();
+    if (child < 0) {
+        snprintf(r->note, sizeof(r->note), "fork failed");
+        return;
+    }
+    volatile unsigned char* mem = (volatile unsigned char*)malloc(len);
+    if (!mem) _exit(1);
+    for (size_t i = 0; i < len; i += page) mem[i] = 1;
+    unsigned char byte = 0;
+    if (child == 0) {
+        for (;;) {
+            if (read(ab[0], &byte, 1) != 1) _exit(0);
+            for (int i = 0; i < pages; ++i) byte += mem[(size_t)i * page];
+            if (write(ba[1], &byte, 1) != 1) _exit(0);
+        }
+    }
+    double t0 = now_s();
+    uint64_t done = 0;
+    for (; done < rounds; ++done) {
+        if (write(ab[1], &byte, 1) != 1 || read(ba[0], &byte, 1) != 1) break;
+        for (int i = 0; i < pages; ++i) byte += mem[(size_t)i * page];
+    }
+    double dt = now_s() - t0;
+    close(ab[1]);
+    close(ba[0]);
+    close(ab[0]);
+    close(ba[1]);
+    waitpid(child, NULL, 0);
+    if (had) sched_setaffinity(0, sizeof(before), &before);
+    free((void*)mem);
+    g_sink = byte;
+    if (done == 0) {
+        snprintf(r->note, sizeof(r->note), "no round trip completed");
+        return;
+    }
+    r->seconds = dt;
+    r->value = dt / (double)(2 * done) * 1e9;
+    snprintf(r->note, sizeof(r->note), "pipe ping-pong on one CPU, %d pages touched per wake", pages);
+    r->ok = 1;
+#else
+    (void)rounds;
+    (void)pages;
+    snprintf(r->note, sizeof(r->note), "not measured on this OS");
+#endif
+}
+
 /* ---- instruction throughput ------------------------------------------- */
 
 static void bench_ipc(uint64_t iters) {
@@ -634,6 +704,8 @@ int main(int argc, char** argv) {
     bench_memcpy_glibc(mem, mem_reps);
     bench_latency(mem, quick ? 2000000ull : 20000000ull);
     bench_syscall(quick ? 100000ull : 2000000ull);
+    bench_ctx_switch("ctx_switch", quick ? 5000ull : 100000ull, 0);
+    bench_ctx_switch("ctx_switch_64p", quick ? 5000ull : 100000ull, 64);
     bench_ipc(quick ? 20000000ull : 400000000ull);
 #ifdef HAVE_JIT_BENCH
     bench_jit(quick ? 512 : 4096);

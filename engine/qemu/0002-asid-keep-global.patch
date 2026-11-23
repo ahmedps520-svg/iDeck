@@ -1,0 +1,191 @@
+diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
+index 1040af2..cc93bcf 100644
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -417,6 +417,63 @@ void tlb_flush(CPUState *cpu)
+     tlb_flush_by_mmuidx(cpu, ALL_MMUIDX_BITS);
+ }
+ 
++/* The page address of an entry in use, with its flag bits. */
++static inline vaddr tlb_entry_any_addr(const CPUTLBEntry *te)
++{
++    if (te->addr_read != -1) {
++        return te->addr_read;
++    }
++    if (te->addr_write != -1) {
++        return te->addr_write;
++    }
++    return te->addr_code;
++}
++
++void tlb_flush_low_by_mmuidx(CPUState *cpu, uint16_t idxmap, unsigned bit)
++{
++    const vaddr high = (vaddr)1 << bit;
++    int64_t now = get_clock_realtime();
++    uint16_t work;
++
++    assert_cpu_is_self(cpu);
++
++    qemu_spin_lock(&cpu->neg.tlb.c.lock);
++    /* Indexes that are not dirty are empty. They stay marked dirty here. */
++    for (work = idxmap & cpu->neg.tlb.c.dirty; work != 0; work &= work - 1) {
++        int mmu_idx = ctz32(work);
++        CPUTLBDesc *desc = &cpu->neg.tlb.d[mmu_idx];
++        CPUTLBDescFast *fast = &cpu->neg.tlb.f[mmu_idx];
++        size_t n = tlb_n_entries(fast);
++
++        /* Sizing happens at flushes; a resized table starts empty. */
++        tlb_mmu_resize_locked(desc, fast, now);
++        if (tlb_n_entries(fast) != n) {
++            tlb_mmu_flush_locked(desc, fast);
++            continue;
++        }
++        for (size_t i = 0; i < n; i++) {
++            CPUTLBEntry *te = &fast->table[i];
++
++            if (!tlb_entry_is_empty(te) && !(tlb_entry_any_addr(te) & high)) {
++                memset(te, -1, sizeof(*te));
++                desc->n_used_entries--;
++            }
++        }
++        for (size_t k = 0; k < CPU_VTLB_SIZE; k++) {
++            CPUTLBEntry *te = &desc->vtable[k];
++
++            if (!tlb_entry_is_empty(te) && !(tlb_entry_any_addr(te) & high)) {
++                memset(te, -1, sizeof(*te));
++                desc->n_used_entries--;
++            }
++        }
++    }
++    qemu_spin_unlock(&cpu->neg.tlb.c.lock);
++
++    /* A jump cache entry is found by virtual address alone. */
++    tcg_flush_jmp_cache(cpu);
++}
++
+ void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint16_t idxmap)
+ {
+     const run_on_cpu_func fn = tlb_flush_by_mmuidx_async_work;
+diff --git a/include/exec/cputlb.h b/include/exec/cputlb.h
+index 8125f68..1f195c1 100644
+--- a/include/exec/cputlb.h
++++ b/include/exec/cputlb.h
+@@ -178,6 +178,18 @@ void tlb_flush_page_by_mmuidx_all_cpus_synced(CPUState *cpu, vaddr addr,
+  */
+ void tlb_flush_by_mmuidx(CPUState *cpu, uint16_t idxmap);
+ 
++/**
++ * tlb_flush_low_by_mmuidx:
++ * @cpu: CPU whose TLB should be flushed; must be the current CPU
++ * @idxmap: bitmap of MMU indexes to flush
++ * @bit: number of an address bit
++ *
++ * Flush, in the given MMU indexes, the entries for virtual addresses
++ * in which @bit is clear, and keep the others (iDeck: the user half of
++ * an AArch64 address space when the ASID changes).
++ */
++void tlb_flush_low_by_mmuidx(CPUState *cpu, uint16_t idxmap, unsigned bit);
++
+ /**
+  * tlb_flush_by_mmuidx_all_cpus_synced:
+  * @cpu: Originating CPU of the flush
+diff --git a/target/arm/cpu.c b/target/arm/cpu.c
+index 8f71902..ab10ded 100644
+--- a/target/arm/cpu.c
++++ b/target/arm/cpu.c
+@@ -2674,6 +2674,7 @@ static const Property arm_cpu_properties[] = {
+     /* True to default to the backward-compat old CNTFRQ rather than 1Ghz */
+     DEFINE_PROP_BOOL("backcompat-cntfrq", ARMCPU, backcompat_cntfrq, false),
+     DEFINE_PROP_BOOL("x-host-vfp", ARMCPU, host_vfp, false),
++    DEFINE_PROP_BOOL("x-asid-keep-global", ARMCPU, asid_keep_global, false),
+     DEFINE_PROP_BOOL("backcompat-pauth-default-use-qarma5", ARMCPU,
+                       backcompat_pauth_default_use_qarma5, false),
+ };
+diff --git a/target/arm/cpu.h b/target/arm/cpu.h
+index cbc3bb3..bab9df9 100644
+--- a/target/arm/cpu.h
++++ b/target/arm/cpu.h
+@@ -701,6 +701,14 @@ typedef struct CPUArchState {
+         uint64_t smcr_el[4];  /* SMCR_EL[1-3] */
+     } vfp;
+ 
++    /*
++     * iDeck (x-asid-keep-global): set when a stage 1 walk found a
++     * non-global (nG) mapping in the upper half of the address space
++     * since the last full TLB flush for an ASID change. While it is
++     * clear, every upper-half TLB entry is global.
++     */
++    bool tlb_high_ng;
++
+     uint64_t exclusive_addr;
+     uint64_t exclusive_val;
+     /*
+@@ -1021,6 +1029,13 @@ struct ArchCPU {
+      */
+     bool host_vfp;
+ 
++    /*
++     * QOM property x-asid-keep-global: when the guest changes the ASID
++     * in TTBR0_EL1/TTBR1_EL1, flush only TLB entries that can belong to
++     * an ASID (see vmsa_ttbr_write) instead of the whole TLB.
++     */
++    bool asid_keep_global;
++
+     /* QOM property to indicate we should use the back-compat QARMA5 default */
+     bool backcompat_pauth_default_use_qarma5;
+ 
+diff --git a/target/arm/helper.c b/target/arm/helper.c
+index 6ba46d5..534cf0d 100644
+--- a/target/arm/helper.c
++++ b/target/arm/helper.c
+@@ -4340,7 +4340,28 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
+     if (cpreg_field_is_64bit(ri) &&
+         extract64(raw_read(env, ri) ^ value, 48, 16) != 0) {
+         ARMCPU *cpu = env_archcpu(env);
+-        tlb_flush(CPU(cpu));
++
++        if (cpu->asid_keep_global && !env->tlb_high_ng &&
++            arm_el_is_aa64(env, 1)) {
++            /*
++             * iDeck: QEMU's TLB has no ASID, so an ASID change must drop
++             * every entry that belongs to an ASID: the non-global ones.
++             * No non-global mapping has been walked in the upper (TTBR1)
++             * half since the last full flush, so every upper-half entry
++             * is global and stays valid; the lower half is dropped
++             * whole. Only the EL1&0 regime uses this ASID. Linux without
++             * KPTI maps the kernel global, and keeps it here across
++             * every process switch.
++             */
++            tlb_flush_low_by_mmuidx(CPU(cpu),
++                                    ARMMMUIdxBit_E10_0 |
++                                    ARMMMUIdxBit_E10_1 |
++                                    ARMMMUIdxBit_E10_1_PAN,
++                                    55);
++        } else {
++            tlb_flush(CPU(cpu));
++            env->tlb_high_ng = false;
++        }
+     }
+     raw_write(env, ri, value);
+ }
+diff --git a/target/arm/ptw.c b/target/arm/ptw.c
+index 92d6bd9..55adbad 100644
+--- a/target/arm/ptw.c
++++ b/target/arm/ptw.c
+@@ -2001,6 +2001,16 @@ static bool get_phys_addr_lpae(CPUARMState *env, S1Translate *ptw,
+     } else {
+         int nse, ns = extract32(attrs, 5, 1);
+         uint8_t attrindx;
++
++        /*
++         * iDeck (x-asid-keep-global): remember that a non-global mapping
++         * exists in the upper half of the address space. Bit 11 is nG in
++         * the regimes that have ASIDs (and NSE at EL3, where setting the
++         * flag only costs a full flush).
++         */
++        if (extract32(attrs, 11, 1) && extract64(address, 55, 1)) {
++            env->tlb_high_ng = true;
++        }
+         uint64_t mair;
+         int user_rw, prot_rw;
+ 

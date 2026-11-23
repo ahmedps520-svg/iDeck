@@ -87,9 +87,18 @@ jobs:
             --bin build/core/ideck-bench-aarch64-linux-musl:ideck-bench \
             --cpu "$GUEST_CPU,x-host-vfp=on" --out out/vfp-on \
             --append "${{ inputs.fpdump && format('fpdump={0}', inputs.fpdump) || '' }}"
+      - name: Guest with host VFP and kernel TLB entries kept across process switches
+        run: |
+          python engine/run_guest_tests.py \
+            --qemu "${{ steps.qemu.outputs.qemu }}" \
+            --kernel out/Image --busybox /usr/bin/busybox \
+            --bin build/core/ideck-fpcheck-aarch64-linux-musl:ideck-fpcheck \
+            --bin build/core/ideck-bench-aarch64-linux-musl:ideck-bench \
+            --cpu "$GUEST_CPU,x-host-vfp=on,x-asid-keep-global=on" --out out/vfp-asid
       - name: Compare with hardware
         run: |
           python engine/compare.py --native out/native --off out/vfp-off --on out/vfp-on \
+            --also vfp-asid:out/vfp-asid \
             --strict-flags --md "$GITHUB_STEP_SUMMARY"
       - name: Dump differences
         if: always() && inputs.fpdump != ''
@@ -108,6 +117,7 @@ jobs:
             out/native
             out/vfp-off
             out/vfp-on
+            out/vfp-asid
             !out/**/test-initramfs.cpio.gz
       - uses: actions/upload-artifact@v4
         with:
