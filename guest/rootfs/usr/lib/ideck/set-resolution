@@ -15,14 +15,19 @@ run_x() { runuser -u deck -- env DISPLAY=:0 "$@"; }
 
 OUT=$(run_x xrandr --query | awk '/ connected/{print $1; exit}')
 [ -n "$OUT" ] || { echo "no connected output" >&2; exit 1; }
-MODE="${W}x${H}"
-# The 60 Hz mode keeps its plain name; other rates get their own mode.
-[ "$HZ" = 60 ] || MODE="${W}x${H}_${HZ}"
-if ! run_x xrandr --query | grep -qE "^\s+${MODE}\s"; then
+# Every rate gets its own mode. The mode virtio-gpu offers under the plain
+# name "${W}x${H}" runs at QEMU's default 75 Hz, not 60.
+MODE="${W}x${H}_${HZ}"
+MODES=$(run_x xrandr --query)
+if ! grep -qE "^\s+${MODE}\s" <<<"$MODES"; then
     MODELINE=$(cvt "$W" "$H" "$HZ" | sed -n 's/^Modeline "[^"]*" //p')
-    run_x xrandr --newmode "$MODE" $MODELINE 2>/dev/null || true
+    [ -n "$MODELINE" ] || { echo "cvt gave no modeline for ${W}x${H} at ${HZ} Hz" >&2; exit 1; }
+    # newmode fails harmlessly when the mode is already defined but not yet
+    # added to this output.
+    # shellcheck disable=SC2086  # the modeline is a list of numbers and flags
+    run_x xrandr --newmode "$MODE" $MODELINE || true
     run_x xrandr --addmode "$OUT" "$MODE"
 fi
 run_x xrandr --output "$OUT" --mode "$MODE"
 echo "$OUT $MODE"
-run_x xrandr --query | grep -m1 -F '*' || true
+run_x xrandr --query | grep -F '*' | head -1 || true

@@ -335,7 +335,9 @@ Reply execute_slow(const Job& job) {
         rep.result = run_to_json({lib("set-resolution"), std::to_string(w), std::to_string(h),
                                   std::to_string(hz)},
                                  20000);
-        if (rep.result["exit_code"].as_int() != 0) return fail("set-resolution failed");
+        if (rep.result["exit_code"].as_int() != 0) {
+            return fail("set-resolution failed: " + rep.result["output"].string_or("").substr(0, 600));
+        }
         return rep;
     }
     if (job.op == "bench.run") {

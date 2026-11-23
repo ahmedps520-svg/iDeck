@@ -544,6 +544,9 @@ def main() -> int:
                 while blank_at and time.time() - t_start < 900:
                     if screenshot(f"screen-ab-{label}") > 25000:
                         window_at = time.time()
+                        # The next screenshot replaces this one: keep the first drawn frame.
+                        shutil.copyfile(a.report / f"screen-ab-{label}.png",
+                                        a.report / f"screen-ab-{label}-first.png")
                         break
                     agent.wait_event("__none__", 5)
                 res["window_s"] = round(window_at - t_start, 1) if window_at else None
