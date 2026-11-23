@@ -57,7 +57,7 @@ Build 29 with runtime 0.1.9.
 - The agent reads `/proc` directly and sets nice with `setpriority()`. It runs `xdotool` only on a state change, and every 6 s while away, as root: the X session allows `localuser:root`.
 - CI run 45183440240, software UI, sign-in window: guest CPU 6.3% shown, 7.3% hidden, 6.3% shown again. Runtime 0.1.10's software-UI run measured 11.6%, 9.6% and 10.3%. The window was minimised and restored as before.
 
-## GPU-drawn Steam UI (experimental, build 33+)
+## GPU-drawn Steam UI (experimental, build 34+)
 
 Settings › Steam › **GPU-drawn Steam UI** starts Steam without `-cef-disable-gpu`, and gives only `steamwebhelper` `MESA_LOADER_DRIVER_OVERRIDE=zink` (set in `steam-path/taskset`).
 - Chromium's OpenGL then runs on Vulkan through Mesa's Zink, which on the iPad means Venus and MoltenVK on Metal, instead of drawing on the emulated CPU.

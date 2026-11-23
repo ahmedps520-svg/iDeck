@@ -168,7 +168,7 @@ Tested: `-cef-disable-site-isolation -cef-force-opaque-backgrounds -cef-disable-
 - The web helper used 7 processes and 1534 MB without them, and 8 processes and 1450 MB with them.
 - Not used.
 
-## Logged on the iPad from build 33
+## Logged on the iPad from build 34
 
 The questions above can only be answered on the device. `ideck.log` now records:
 - `address space with Linux running:` (TASK_VM_INFO), which decides whether the TCG cache can go to 2 GiB.

@@ -249,7 +249,7 @@ Reply execute_slow(const Job& job) {
         // Keep Steam's own CPU pinning of steamwebhelper (only for A/B tests).
         env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
         // Steam's Low Performance and Low Bandwidth library modes (steam_prefs.py).
-        // On unless the app says otherwise (builds before 33 do not send it).
+        // On unless the app says otherwise (builds before 34 do not send it).
         env += std::string("IDECK_STEAM_LIGHT_LIBRARY=") + (a["light_library"].as_bool(true) ? "1" : "0") + "\n";
         // Experimental: steamwebhelper's OpenGL through Zink (Vulkan/Venus).
         // "zink-cpu" is for CI only: Zink on lavapipe, which Mesa only uses

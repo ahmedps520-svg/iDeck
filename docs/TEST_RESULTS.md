@@ -423,6 +423,27 @@ Runtime 0.1.10 candidate (commit 94cc92b), `runtime.yml` boot tests with Steam's
 - **Cache flushes:** 384 MiB 19 / 35, 1024 MiB 5 / 9, 2048 MiB 2 / 4 (by the window / about 10 min later; runs 45019070085, 45023348581, 45023361147).
 - `tools/tests` (24 tests) and the agent's `/proc` parsing test passed.
 
+### CI, 2026-11-23: runtime 0.1.11 candidates (software Steam UI, 1 GiB TCG cache)
+
+- **Steam UI in the agent** (run 45183440240, commit 2ba8b88):
+  - `steam-ui-daemon` is gone, and the states still work: the away screenshot is blank (4,319 bytes) and the window is back at 38 KB.
+  - Guest CPU on the sign-in screen was 6.3% shown, 7.3% hidden, 6.3% shown again (runtime 0.1.10: 11.6, 9.6, 10.3).
+  - TCG cache flushes: 4 by the window, 7 in total.
+- **Lean Chromium options:** no gain. 60.5 s against 60.6 s to the window, 7 against 8 processes, 1534 against 1450 MB. Removed again.
+- **CPU model, `--bench-only`** (run 45183440240):
+  - `mem_copy_glibc` (new): n1 2,698, max 3,843, n1 again 2,732 MB/s.
+  - Other results within noise.
+- **Full boot tests, n1 against max** (runs 45190915383, 45190934622):
+  - On both, Steam's window appeared (621 s and 650 s after start) and the UI states worked.
+  - Benchmark, n1 against max: `mem_copy_glibc` 2,630 / 3,225 MB/s, `fp_single` 181 / 224, `mem_latency` 213 / 184 ns.
+  - The app uses `max` from build 34.
+- **Disk flushes** (QMP `query-blockstats`, run 45190915383):
+  - Library disk: 1,119 flushes taking 19.0 s by Steam's window, including the 5.7 GB Steam install.
+  - About 1,400 more in the following 20 minutes of Steam restarts.
+  - That is on the CI host's fdatasync; the iPad's F_FULLFSYNC is logged from build 34.
+- **Zink, first attempt:** the window never drew. The web helper's GPU process loaded the Vulkan loader and `libvulkan_radeon` but had no device, because CI has no GPU and Zink skips CPU Vulkan devices. The next check runs Zink on lavapipe (`zink-cpu`).
+- **Tests:** agent 49 checks; `tools/tests` 25; guest Python 26 (including `steam_prefs.py`); all passed.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

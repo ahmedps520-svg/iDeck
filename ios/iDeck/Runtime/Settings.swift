@@ -30,7 +30,7 @@ struct Settings: Codable, Equatable {
     var resolution: Resolution = .p720
     var guestMemoryMb: UInt64 = 0          // 0 = automatic
     /// QEMU's "max" (with PAuth, SVE and SME off, core/qemu_args) since
-    /// build 33: FEAT_MOPS lets glibc copy memory with QEMU's host memmove.
+    /// build 34: FEAT_MOPS lets glibc copy memory with QEMU's host memmove.
     /// CI 2026-11-23: glibc memcpy +23-40%, FP +12-23%, Steam unchanged.
     var cpuModel = "max"
     /// Settings written before version 2 had neoverse-n1 as the default CPU
