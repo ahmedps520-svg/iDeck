@@ -37,6 +37,11 @@
   - CI, sign-in window: guest CPU 22.5% shown, 13.5% hidden, 18.5% shown again (4 vCPUs, 60 s averages).
   - Details in [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen).
 - **No second Steam install after setup** (runtime 0.1.9): the bootstrap keeps Steam's package files and its installed-manifest copy. The client's first start now skips the 574 MB re-download and the 5–7 minutes of extraction.
+- **TCG cache sized from memory headroom** (build 31): up to 1 GiB instead of 384 MiB, which cut cache flushes about fourfold in CI. See [below](#tcg-cache-flushes-measured-in-ci).
+- **Steam's UI on every vCPU** (runtime 0.1.10):
+  - Steam's `steamrtarm64/steamwebhelper.sh` runs `taskset 0x7c`, pinning the whole Chromium UI to CPUs 2–6 (Steam Frame's big cores). In the VM that is 2 of 4 vCPUs, 4 of 6, and no CPU at all with 2.
+  - `ideck-steam-launch` puts `/usr/lib/ideck/steam-path` first in Steam's PATH. Its `taskset` starts the web helper unpinned and passes every other call to util-linux. This keeps working after Steam updates itself.
+  - CI: `Cpus_allowed_list` of the web helper is 2-3 pinned and 0-3 with the override. The sign-in window after a Steam restart took 90.7 s pinned and 79.0 s unpinned in GPU mode, and 66.6 s against 66.5 s with the software UI. The sign-in screen does little work in parallel; the library does more.
 - **GPU:** zero-copy SPICE GL scanout into an MTKView; frames are presented on display refresh (`preferredFramesPerSecond = 120`) and drawn only when new.
 - **Storage:** raw sparse images with `discard=unmap`, `detect-zeroes=unmap`, `aio=threads`; no qcow2 overhead; APFS clones for snapshots.
 - **Background work:** apt/man/fstrim timers are masked, and no desktop environment runs.
@@ -122,6 +127,37 @@ feel these costs most.
 
 These are CI numbers on a Neoverse server core. The iPad gets `kpti=0` from build 28 with any runtime, and its `guest agent ready` line shows whether KPTI is off.
 
+## TCG cache flushes (measured in CI)
+
+QEMU translates guest code into a fixed buffer (`-accel tcg,tb-size=`). When the buffer is full, QEMU flushes all of it: every vCPU stops, and all code is translated again (14.9 µs per block cold in `ideck-bench`).
+
+**Counted** with QMP `x-query-jit` in `runtime.yml` boot tests on 2026-11-22: 4 vCPUs, 4 GiB guest, software-rendered Steam UI. Runs 45019070085, 45023348581 and 45023361147.
+
+| Cache | Flushes by Steam's sign-in window | Flushes after the UI test and two Steam restarts (about 10 min later) |
+|---|---|---|
+| 384 MiB (iPad up to build 30) | 19 | 35 |
+| 1024 MiB | 5 | 9 |
+| 2048 MiB | 2 | 4 |
+
+**What CI does and does not show.** The CI timings hardly changed: time to the sign-in window was 66.6 s at every size, and the benchmark stayed in its usual range. On the server CPU, a flush is cheap compared with the rest of the work. On the iPad, each flush lands while you use Steam's UI, and its code then has to be translated again. That matches the periodic near-freezes reported on the device.
+
+**Build 31** plans the cache from the memory headroom: 512, 768 or 1024 MiB, whichever still fits the limit. The iPad run of build 30 had 11 GB of headroom (limit 12288 MiB, footprint about 1.1 GB).
+
+**Why not 2 GiB.** The cap is 1024 MiB because split-wx maps the buffer twice, and iDeck runs without the extended-virtual-addressing entitlement. The boot log now records the address space (`address space with Linux running:`), so 2 GiB can be decided on device data.
+
+## Device run, build 30 (iPad17,2, iPadOS 27.2, paid Apple ID, 2026-11-22)
+
+From `ideck.log`, `linux-steam.log` and `qemu.log`, copied from the iPad over USB:
+
+- **Memory:** limit 12288 MiB with increased-memory-limit. Guest 4096 MiB (file-backed), TCG cache 384 MiB, 6 vCPUs (Performance). Footprint about 1.1 GB; guest used at most 1.4 GB. No memory pressure.
+- **CPU:** guest CPU was 60–80% of 6 vCPUs while Steam started and loaded the library, and 2–6% when idle.
+- **Vulkan: no device in Linux.**
+  - The app group from iloader is 30 characters, `group.com.ideck.app.<team ID>`.
+  - UTM's virglrenderer refuses names longer than 28 characters before it calls `shm_open`: `APP_SANDBOX_GROUP_ID is 30 chars, at most 28 fit`. So the file fallback never ran, and every Venus blob failed (`ctrl 0x10c, error 0x1200`).
+  - Games would have run on llvmpipe. Fixed in build 31 (`ShmGroup`).
+- **Steam crashed once:** the main process got SIGSEGV 2.5 min after start, and systemd restarted it 20 s later. Runtime 0.1.10 restarts it after 5 s. The cause is unknown: the minidump went to Valve, and the journal shows nothing before the crash.
+- **Steam's UI pinning:** at that point Steam's web helper still ran on CPUs 2–5 of 6 (`taskset 0x7c`).
+
 ## Lighter Linux and Steam: research of 2026-11-12, not yet done
 
 Ordered by expected gain. None of these has been measured yet.
@@ -133,6 +169,7 @@ Ordered by expected gain. None of these has been measured yet.
    - Open question: whether the FEX that Steam's ARM64 client runs reads these files. Needs a game test on the device.
 2. **Steam launch flags.** `-cef-disable-hang-timeouts`, `-cef-in-process-gpu`, `-cef-disable-site-isolation` and `-cef-disable-js-logging` exist in the client's option list. Each one needs an A/B run on the device; any of them could crash the web helper.
 3. ~~Keep Steam's UI idle while a game runs.~~ Done in build 29 by minimising Steam's windows and running `steamwebhelper` at nice 19 (see above). Not done: starting Steam with `-silent` once signed in. That would skip building the library window at startup, but CI cannot test it without an account.
+   - Steam's own **Low Performance Mode** (Settings › Library) turns off the library's animations and blur. In the client it is the setting `library_low_perf_mode`, which also turns on with `accessibility_reduce_motion`; steamclient stores it as `LibraryLowPerfMode`. It is per account, so CI cannot test presetting it; for now you switch it on yourself.
 4. **`-noshaders` / no shader pre-caching.** Fossilize already runs at idle priority. Under MoltenVK the host compiles shaders anyway, so pre-caching is probably wasted work.
 5. **`-cpu max,pauth=off,sve=off,sme=off`.** It has E0PD and FEAT_MOPS, and glibc 2.41 uses MOPS `memcpy`, which QEMU implements with host `memmove`. It could raise memcpy further. Risk: many more CPU features under emulation.
 6. **Smaller kernel options:** `audit=0`, `init_on_alloc=0`. Probably small gains.

@@ -326,7 +326,12 @@ Json top_processes(int interval_ms, size_t limit) {
         const ProcStat* st;
     };
     std::vector<Row> rows;
-    std::map<std::string, std::pair<double, int>> by_comm;
+    struct Group {
+        double cpu = 0;
+        int processes = 0;
+        uint64_t rss_pages = 0;  // RSS counts shared pages in every process
+    };
+    std::map<std::string, Group> by_comm;
     for (const auto& [pid, st] : b) {
         auto it = a.find(pid);
         // A process that started during the interval counts from zero.
@@ -334,8 +339,9 @@ Json top_processes(int interval_ms, size_t limit) {
         double cpu = hz > 0 ? 100.0 * static_cast<double>(d) / (hz * secs) : 0.0;
         rows.push_back({pid, cpu, &st});
         auto& g = by_comm[st.comm];
-        g.first += cpu;
-        g.second += 1;
+        g.cpu += cpu;
+        g.processes += 1;
+        g.rss_pages += st.rss_pages;
     }
     std::sort(rows.begin(), rows.end(), [](const Row& x, const Row& y) { return x.cpu > y.cpu; });
 
@@ -353,15 +359,15 @@ Json top_processes(int interval_ms, size_t limit) {
         p.set("cpus", status_value(status, "Cpus_allowed_list"));
         procs.push(std::move(p));
     }
-    std::vector<std::pair<std::string, std::pair<double, int>>> groups(by_comm.begin(), by_comm.end());
-    std::sort(groups.begin(), groups.end(),
-              [](const auto& x, const auto& y) { return x.second.first > y.second.first; });
+    std::vector<std::pair<std::string, Group>> groups(by_comm.begin(), by_comm.end());
+    std::sort(groups.begin(), groups.end(), [](const auto& x, const auto& y) { return x.second.cpu > y.second.cpu; });
     Json g = Json::array();
     for (size_t i = 0; i < groups.size() && i < 10; ++i) {
         Json e = Json::object();
         e.set("comm", groups[i].first);
-        e.set("cpu", round1(groups[i].second.first));
-        e.set("processes", groups[i].second.second);
+        e.set("cpu", round1(groups[i].second.cpu));
+        e.set("processes", groups[i].second.processes);
+        e.set("rss_mb", round1(static_cast<double>(groups[i].second.rss_pages) * page_mb));
         g.push(std::move(e));
     }
     auto total = cpu_usage(cpu_a, cpu_b);

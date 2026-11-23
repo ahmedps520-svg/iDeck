@@ -101,9 +101,10 @@ def build_agent_tests(target: str | None, debug: bool) -> Path:
     out = OUT / exe_name("ideck_agent_tests" + (f"-{target}" if target else ""), target)
     agent_dir = ROOT / "guest" / "agent"
     srcs = [CORE / "src" / n for n in ("json.cpp", "protocol.cpp")]
-    srcs += [agent_dir / n for n in ("sysinfo.cpp", "gamepad.cpp", "agent_tests.cpp")]
+    srcs += [agent_dir / n for n in ("sysinfo.cpp", "gamepad.cpp", "process.cpp", "steam_ui.cpp", "agent_tests.cpp")]
     srcs += [CORE / "tests" / "test_main.cpp"]
-    run(compiler("c++") + cxx_flags(target, debug) + ["-I", str(agent_dir)] + [str(s) for s in srcs] +
+    libs = [] if (target is None and os.name == "nt") else ["-lpthread"]
+    run(compiler("c++") + cxx_flags(target, debug) + ["-I", str(agent_dir)] + [str(s) for s in srcs] + libs +
         ["-o", str(out)])
     return out
 

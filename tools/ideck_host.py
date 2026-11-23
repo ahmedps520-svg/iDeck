@@ -217,6 +217,9 @@ def top_summary(top: dict) -> dict:
         "by_command": (top.get("by_command") or [])[:6],
         "webhelper_cpus_allowed": sorted({str(p.get("cpus")) for p in helpers}),
         "webhelper_processes_listed": len(helpers),
+        # All steamwebhelper processes (by_command covers every process).
+        "webhelper": next(({"processes": g.get("processes"), "cpu": g.get("cpu"), "rss_mb": g.get("rss_mb")}
+                           for g in top.get("by_command") or [] if g.get("comm") == "steamwebhelper"), None),
     }
 
 
@@ -250,6 +253,8 @@ def main() -> int:
                     help="TCG translation cache (tb-size); the iPad uses 384 for a 4 GiB guest")
     ap.add_argument("--steam-pin-ab", action="store_true",
                     help="restart Steam with and without Steam's CPU pinning of steamwebhelper and time its window")
+    ap.add_argument("--steam-lean-ab", action="store_true",
+                    help="restart Steam without and with the lean Chromium options (cef_lean) and compare")
     a = ap.parse_args()
     if a.bench_only:
         a.cmdline_add.append("ideck.noprovision")
@@ -473,47 +478,56 @@ def main() -> int:
             report["steam_ui"] = ui
             jit("after-ui")
 
-        # Steam's steamwebhelper.sh pins its UI to CPUs 2-6 (2 of 4 vCPUs).
-        # Restart Steam with that pinning kept, then with iDeck's override,
-        # and time each until the sign-in window is drawn again (a blank
-        # screen is ~4 KB as PNG, the sign-in window ~34 KB).
-        if a.steam_pin_ab and window_seen_at is not None:
-            def restart_timing(label: str, pin: bool) -> dict:
-                res: dict = {"pin_webhelper": pin}
-                try:
-                    agent.request("steam.configure", {"lightweight": True, "cef_software": a.steam_software_ui,
-                                                      "pin_webhelper": pin})
-                    t_start = time.time()
-                    agent.request("steam.restart", timeout=120)
-                    # Wait for the old window to go, then for the new one.
-                    blank_at = None
-                    while time.time() - t_start < 120:
-                        if screenshot(f"screen-pin-{label}") < 10000:
-                            blank_at = time.time()
-                            break
-                        agent.wait_event("__none__", 3)
-                    res["stopped_s"] = round(blank_at - t_start, 1) if blank_at else None
-                    window_at = None
-                    while blank_at and time.time() - t_start < 900:
-                        if screenshot(f"screen-pin-{label}") > 25000:
-                            window_at = time.time()
-                            break
-                        agent.wait_event("__none__", 5)
-                    res["window_s"] = round(window_at - t_start, 1) if window_at else None
-                    if window_at:
-                        agent.wait_event("__none__", 20)
-                        res["top"] = top(f"pin-{label}")
-                        res["cpu_60s"] = cpu_average(60)
-                except Exception as e:  # noqa: BLE001
-                    res["error"] = str(e)
-                log(f"steam-pin-{label}", res, ok=res.get("window_s") is not None)
-                return res
+        # A/B of Steam launch options: restart Steam with each set and time
+        # it until the sign-in window is drawn again (a blank screen is ~4 KB
+        # as PNG, the sign-in window ~34 KB), then sample processes and CPU.
+        # --steam-pin-ab: Steam's own CPU pinning of steamwebhelper (2-6)
+        # kept versus iDeck's override. --steam-lean-ab: the lean Chromium
+        # options (cef_lean) off versus on.
+        def restart_timing(label: str, options: dict) -> dict:
+            res: dict = dict(options)
+            try:
+                agent.request("steam.configure", {"lightweight": True, "cef_software": a.steam_software_ui,
+                                                  **options})
+                t_start = time.time()
+                agent.request("steam.restart", timeout=120)
+                # Wait for the old window to go, then for the new one.
+                blank_at = None
+                while time.time() - t_start < 120:
+                    if screenshot(f"screen-ab-{label}") < 10000:
+                        blank_at = time.time()
+                        break
+                    agent.wait_event("__none__", 3)
+                res["stopped_s"] = round(blank_at - t_start, 1) if blank_at else None
+                window_at = None
+                while blank_at and time.time() - t_start < 900:
+                    if screenshot(f"screen-ab-{label}") > 25000:
+                        window_at = time.time()
+                        break
+                    agent.wait_event("__none__", 5)
+                res["window_s"] = round(window_at - t_start, 1) if window_at else None
+                if window_at:
+                    agent.wait_event("__none__", 20)
+                    res["png_bytes"] = screenshot(f"screen-ab-{label}")  # kept for a look
+                    res["top"] = top(f"ab-{label}")
+                    res["cpu_60s"] = cpu_average(60)
+            except Exception as e:  # noqa: BLE001
+                res["error"] = str(e)
+            log(f"steam-ab-{label}", res, ok=res.get("window_s") is not None)
+            return res
 
+        if a.steam_pin_ab and window_seen_at is not None:
             report["pin_ab"] = {
-                "pinned": restart_timing("pinned", True),
-                "unpinned": restart_timing("unpinned", False),
+                "pinned": restart_timing("pinned", {"pin_webhelper": True}),
+                "unpinned": restart_timing("unpinned", {"pin_webhelper": False}),
             }
             jit("after-pin-ab")
+        if a.steam_lean_ab and window_seen_at is not None:
+            report["lean_ab"] = {
+                "default": restart_timing("default", {"cef_lean": False}),
+                "lean": restart_timing("lean", {"cef_lean": True}),
+            }
+            jit("after-lean-ab")
 
         # A Steam restart (the next iDeck launch) must not install the
         # client again: with the bootstrap's package/*.manifest the updater

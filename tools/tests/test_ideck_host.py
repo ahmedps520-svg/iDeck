@@ -61,11 +61,18 @@ class TopSummaryTests(unittest.TestCase):
         self.assertEqual(s["webhelper_processes_listed"], 2)
         self.assertEqual(len(s["by_command"]), 6)
         self.assertEqual(s["online_cpus"], "0-3")
+        self.assertEqual(s["webhelper"], {"processes": 7, "cpu": 120.0, "rss_mb": None})
+
+    def test_webhelper_group_with_memory(self):
+        top = {"by_command": [{"comm": "steam", "cpu": 5.0, "processes": 1, "rss_mb": 300.0},
+                              {"comm": "steamwebhelper", "cpu": 40.0, "processes": 5, "rss_mb": 900.5}]}
+        self.assertEqual(h.top_summary(top)["webhelper"], {"processes": 5, "cpu": 40.0, "rss_mb": 900.5})
 
     def test_missing_fields(self):
         s = h.top_summary({})
         self.assertEqual(s["webhelper_cpus_allowed"], [])
         self.assertEqual(s["by_command"], [])
+        self.assertIsNone(s["webhelper"])
 
 
 if __name__ == "__main__":

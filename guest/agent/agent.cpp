@@ -23,6 +23,7 @@
 #include "ideck/json.hpp"
 #include "ideck/protocol.hpp"
 #include "process.hpp"
+#include "steam_ui.hpp"
 #include "sysinfo.hpp"
 
 #if defined(__linux__)
@@ -44,6 +45,9 @@ namespace {
 constexpr const char* kAgentVersion = "0.1.0";
 constexpr const char* kLibDir = "/usr/lib/ideck";
 constexpr const char* kStateDir = "/var/lib/ideck";
+
+// Steam UI state (steam.ui); its thread starts in run_agent().
+agent::SteamUi g_steam_ui;
 constexpr const char* kDataDiskDev = "/dev/disk/by-id/virtio-ideck-data";
 constexpr size_t kMaxPending = 1 << 20;
 
@@ -188,7 +192,7 @@ Reply execute_slow(const Job& job) {
         r.set("pids", std::move(pids));
         r.set("bootstrap", read_json_file("/home/deck/.local/share/ideck/steam-bootstrap.json"));
         // steam-ui-daemon: requested state, game running, webhelper nice.
-        r.set("ui", read_json_file("/run/ideck/steam-ui.json"));
+        r.set("ui", g_steam_ui.status());
         rep.result = std::move(r);
         return rep;
     }
@@ -244,6 +248,8 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_STEAM_SMALL=") + (a["small_mode"].as_bool(false) ? "1" : "0") + "\n";
         // Keep Steam's own CPU pinning of steamwebhelper (only for A/B tests).
         env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
+        // Fewer Chromium processes and less drawing work (ideck-steam-launch).
+        env += std::string("IDECK_STEAM_CEF_LEAN=") + (a["cef_lean"].as_bool(false) ? "1" : "0") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
         // disk survives runtime updates (system disk replacement).
         const std::string paths[] = {std::string(kStateDir) + "/steam.env", "/home/.ideck/steam.env"};
@@ -258,35 +264,23 @@ Reply execute_slow(const Job& job) {
         return rep;
     }
     if (job.op == "steam.ui") {
-        // What the iPad shows, for steam-ui-daemon: "visible" (Steam on the
-        // Linux screen), "game" (a game is launching or running) or "away"
-        // (iDeck's own screens). The daemon minimises Steam's windows and
-        // lowers steamwebhelper's priority accordingly.
-        // Without "state" it only reports the daemon's status (cheap: the
-        // app polls it while a game runs).
+        // What the iPad shows: "visible" (Steam on the Linux screen), "game"
+        // (a game is launching or running) or "away" (iDeck's own screens).
+        // SteamUi minimises Steam's windows and lowers steamwebhelper's
+        // priority accordingly (steam_ui.hpp). Without "state" it only
+        // reports the status (cheap: the app polls it while a game runs).
         std::string state = a["state"].string_or("");
         if (!state.empty()) {
             if (state != "visible" && state != "game" && state != "away") {
                 return fail("state must be visible, game or away");
             }
-            mkdir("/run/ideck", 0755);
-            const std::string path = "/run/ideck/steam-ui", tmp = path + ".tmp";
-            std::FILE* f = std::fopen(tmp.c_str(), "wb");
-            if (!f) return fail("cannot write " + path);
-            std::string line = state + "\n";
-            std::fwrite(line.data(), 1, line.size(), f);
-            std::fclose(f);
-            if (std::rename(tmp.c_str(), path.c_str()) != 0) return fail("cannot replace " + path);
             rep.result.set("requested", state);
-            // The daemon applies a new state within a second and then writes
-            // its status; wait for that (up to 3 s) so the caller can rely on
-            // the windows being minimised before it launches a game.
-            for (int i = 0; i < 30; ++i) {
-                if (read_json_file("/run/ideck/steam-ui.json")["state"].string_or("") == state) break;
-                usleep(100 * 1000);
-            }
+            // Waits (up to 3 s) until the windows are minimised, so the
+            // caller can rely on that before it launches a game.
+            rep.result.set("daemon", g_steam_ui.request(state, 3000));
+        } else {
+            rep.result.set("daemon", g_steam_ui.status());
         }
-        rep.result.set("daemon", read_json_file("/run/ideck/steam-ui.json"));
         return rep;
     }
     if (job.op == "steam.open") {
@@ -553,6 +547,7 @@ int run_agent(const std::string& control_path, const std::string& input_path) {
     ag.control.path = control_path;
     ag.input.path = input_path;
     Worker worker(wake[1]);
+    g_steam_ui.start();
     std::fprintf(stderr, "ideck-agent %s: control=%s input=%s\n", kAgentVersion, control_path.c_str(),
                  input_path.c_str());
 

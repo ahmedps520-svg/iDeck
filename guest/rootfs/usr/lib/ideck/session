@@ -4,8 +4,11 @@
 # for resolution/clipboard, and nothing else competing for the CPU.
 
 xset s off -dpms s noblank 2>/dev/null || true
-# Let services running as this user (Steam) connect without a cookie file.
+# Let services running as this user (Steam) connect without a cookie file,
+# and root: the guest agent minimises and restores Steam's windows
+# (steam_ui.cpp) with xdotool, without a runuser/PAM session per call.
 xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 || true
+xhost +SI:localuser:root >/dev/null 2>&1 || true
 xsetroot -solid '#0b0b0d' 2>/dev/null || true
 # A normal arrow instead of X's default cross. The pointer is shown (Xorg
 # used to run with -nocursor, which left the screen looking empty).

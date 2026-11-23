@@ -439,6 +439,45 @@ static void print_json(int threads, int quick) {
     printf("  ]\n}\n");
 }
 
+/* ---- glibc memcpy ---------------------------------------------------------
+ * This binary is static musl, so bench_memory measures musl's memcpy. Steam,
+ * Chromium and games use glibc's, which picks its routine at run time: with
+ * FEAT_MOPS (QEMU's "max" CPU) glibc 2.41 copies with CPYP/CPYM/CPYE, which
+ * QEMU implements with a host memmove. Debian's python3 copies a buffer
+ * into another through glibc, so that rate is what those programs get.
+ */
+static void bench_memcpy_glibc(size_t bytes, int reps) {
+    result* r = add_result("mem_copy_glibc", "MB/s");
+#if defined(__linux__)
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+             "python3 -c 'import time\n"
+             "n=%zu; r=%d\n"
+             "a=bytearray(b\"Z\")*n; d=bytearray(n); m=memoryview(d); m[:]=a\n"
+             "t=time.perf_counter()\n"
+             "for i in range(r): m[:]=a\n"
+             "print(n*r/(time.perf_counter()-t)/1e6)' 2>/dev/null",
+             bytes, reps);
+    double t0 = now_s();
+    FILE* p = popen(cmd, "r");
+    double v = 0;
+    int got = p ? fscanf(p, "%lf", &v) : 0;
+    int rc = p ? pclose(p) : -1;
+    r->seconds = now_s() - t0;
+    if (got == 1 && rc == 0 && v > 0) {
+        r->value = v;
+        r->ok = 1;
+        snprintf(r->note, sizeof(r->note), "python3 buffer copy %zu MiB x%d", bytes >> 20, reps);
+    } else {
+        snprintf(r->note, sizeof(r->note), "python3 not available or failed");
+    }
+#else
+    (void)bytes;
+    (void)reps;
+    snprintf(r->note, sizeof(r->note), "Linux guest only");
+#endif
+}
+
 int main(int argc, char** argv) {
     int json = 0, quick = 0, threads = cpu_count();
     for (int i = 1; i < argc; ++i) {
@@ -465,6 +504,7 @@ int main(int argc, char** argv) {
     bench_fp_single(fp_n);
     bench_int_multi(int_iters, threads, single);
     bench_memory(mem, mem_reps);
+    bench_memcpy_glibc(mem, mem_reps);
     bench_latency(mem, quick ? 2000000ull : 20000000ull);
     bench_syscall(quick ? 100000ull : 2000000ull);
     bench_ipc(quick ? 20000000ull : 400000000ull);

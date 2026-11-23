@@ -1,6 +1,7 @@
 // Host-runnable tests for the agent's pure parsing and mapping logic.
 #include "../../core/tests/testing.hpp"
 #include "gamepad.hpp"
+#include "steam_ui.hpp"
 #include "sysinfo.hpp"
 
 using namespace agent;
@@ -71,6 +72,35 @@ TEST("agent: /proc/<pid>/stat and status parsing") {
     CHECK_EQ(status_value(status, "Cpus_allowed"), std::string("0c"));
     CHECK_EQ(status_value(status, "Name"), std::string("steamwebhelper"));
     CHECK(status_value(status, "Missing").empty());
+}
+
+TEST("agent: Steam UI helpers") {
+    auto ids = parse_window_ids("12582913\n12582919\n\nnot-an-id\n 4194305 \n");
+    CHECK_EQ(ids.size(), 3u);
+    CHECK_EQ(ids[0], std::string("12582913"));
+    CHECK_EQ(ids[2], std::string("4194305"));
+    CHECK(parse_window_ids("").empty());
+
+    using namespace std::string_literals;
+    CHECK(is_game_launch_cmdline("/home/deck/.local/share/Steam/steamrtarm64/reaper\0SteamLaunch\0AppId=1794680\0--\0game\0"s));
+    CHECK(!is_game_launch_cmdline("/usr/bin/pgrep\0-f\0SteamLaunch AppId=\0"s));  // the pattern as one argument
+    CHECK(!is_game_launch_cmdline("reaper\0SteamLaunch\0AppId=\0"s));             // no app id
+    CHECK(!is_game_launch_cmdline("steamwebhelper\0--type=renderer\0"s));
+
+    CHECK_EQ(webhelper_nice_for("visible", false), 0);
+    CHECK_EQ(webhelper_nice_for("visible", true), 19);
+    CHECK_EQ(webhelper_nice_for("away", false), 19);
+    CHECK_EQ(webhelper_nice_for("game", false), 19);
+
+    auto argv = xdotool_chain("windowminimize", {"1", "2"});
+    CHECK_EQ(argv.size(), 7u);
+    CHECK_EQ(argv[1], std::string("DISPLAY=:0"));
+    CHECK_EQ(argv[3], std::string("windowminimize"));
+    CHECK_EQ(argv[6], std::string("2"));
+
+    // Without its thread (not started here) a request returns the last status.
+    SteamUi ui;
+    CHECK(ui.request("away", 10).is_object());
 }
 
 #if defined(__linux__)

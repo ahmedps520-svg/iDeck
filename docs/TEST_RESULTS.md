@@ -405,6 +405,24 @@ The kernel's own messages, reported by the agent:
 - whether SideStore registers `group.ideck.<team ID>` and Venus then uses real shared memory;
 - an update from build 30 to 31.
 
+### Device run, build 30 with runtime 0.1.9 (iPad17,2, iPadOS 27.2, paid Apple ID via iloader, 2026-11-22)
+
+Installed with iloader 2.4.2 (Import IPA), together with StikDebug 3.2.2 and SideStore. The logs were copied from the iPad with Apple Devices (Files › iDeck › Logs).
+
+- **Signing:** profile valid until 2027-11-22 (long-lived); increased-memory-limit true; extended-virtual-addressing false. App ID `com.ideck.app.<team ID>`.
+- **Boot:** limit 12288 MiB → guest 4096 MiB, TCG cache 384 MiB, 6 vCPUs, Vulkan on with file-backed blob memory. The agent was ready 7 s after QEMU started, with KPTI forced off by the command-line option.
+- **User report:** "very very slow". Steam showed its library, signed in. Guest CPU was 60–80% of 6 vCPUs while Steam loaded; footprint about 1.1 GB.
+- **Vulkan:** no device in Linux (self-test 16/17). `qemu.log` repeats `APP_SANDBOX_GROUP_ID is 30 chars, at most 28 fit`, followed by failing blob commands. Fixed in build 31.
+- **Steam crash:** the main process got SIGSEGV after 155 s; systemd restarted it 20 s later. No cause in the journal.
+- Details and what changed: [PERFORMANCE](PERFORMANCE.md#device-run-build-30-ipad172-ipados-272-paid-apple-id-2026-11-22).
+
+### CI, 2026-11-22: Steam UI pinning and TCG cache size
+
+Runtime 0.1.10 candidate (commit 94cc92b), `runtime.yml` boot tests with Steam's sign-in window:
+- **Pinning:** Steam's web helper ran on CPUs 2-3 pinned and 0-3 with the `steam-path` taskset (agent `top`). The window after a restart took 90.7 s pinned and 79.0 s unpinned (GPU mode, run 45019076683), and 66.6 s against 66.5 s (software UI, run 45019070085).
+- **Cache flushes:** 384 MiB 19 / 35, 1024 MiB 5 / 9, 2048 MiB 2 / 4 (by the window / about 10 min later; runs 45019070085, 45023348581, 45023361147).
+- `tools/tests` (24 tests) and the agent's `/proc` parsing test passed.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |
