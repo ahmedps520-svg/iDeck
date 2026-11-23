@@ -97,6 +97,9 @@ struct SettingsView: View {
                         Text("Neoverse N1 (ARMv8.2)").tag("neoverse-n1")
                         Text("Neoverse V1 (ARMv8.4, no SVE or PAuth)").tag("neoverse-v1")
                     }
+                    Toggle("Native floating point", isOn: $model.settings.nativeFloatingPoint)
+                    Text("On by default. Linux's floating-point and vector math runs directly on this device's processor instead of being emulated in software, which speeds up games and Steam. Turn off if Linux or a game misbehaves; iDeck turns it off by itself if Linux fails to start twice in a row.")
+                        .font(.caption).foregroundStyle(Theme.textTertiary)
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
                     Text("On by default. Keeps Linux's RAM in a file so \(Device.os) can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)

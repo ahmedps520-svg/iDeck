@@ -55,7 +55,8 @@ jobs:
           # Only needed when UTM's dependencies are built from source.
           brew install bison pkg-config gettext glib libgpg-error nasm meson || true
           pip3 install --break-system-packages six pyparsing || pip3 install six pyparsing || true
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: sysroot-cache
         with:
           path: ios/sysroot-iOS-arm64
           key: utm-sysroot-v5.0.8-ios-arm64
@@ -66,6 +67,31 @@ jobs:
         run: |
           export PATH="$(brew --prefix bison)/bin:$PATH"
           bash ios/scripts/fetch_sysroot.sh ios
+      # Saved before QEMU is rebuilt below, so the cache stays UTM's own build.
+      - uses: actions/cache/save@v4
+        if: steps.sysroot-cache.outputs.cache-hit != 'true'
+        with:
+          path: ios/sysroot-iOS-arm64
+          key: utm-sysroot-v5.0.8-ios-arm64
+      - uses: actions/cache@v4
+        id: qemu-cache
+        with:
+          path: ios/qemu-framework
+          key: ideck-qemu-ios-utm-v5.0.8-${{ hashFiles('engine/qemu/*.patch', 'ios/scripts/build_qemu.sh') }}
+      - name: QEMU with iDeck's engine patches (engine/qemu; checked by the Engine workflow)
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: |
+          brew install ninja || true
+          bash ios/scripts/build_qemu.sh ios/sysroot-iOS-arm64
+          rm -rf ios/qemu-framework
+          mkdir -p ios/qemu-framework
+          cp -a ios/sysroot-iOS-arm64/Frameworks/qemu-aarch64-softmmu.framework ios/qemu-framework/
+      - name: Use the patched QEMU
+        run: |
+          FW=ios/sysroot-iOS-arm64/Frameworks/qemu-aarch64-softmmu.framework
+          rm -rf "$FW"
+          cp -a ios/qemu-framework/qemu-aarch64-softmmu.framework "$FW"
+          echo "x-host-vfp strings in the embedded QEMU: $(strings -a "$FW/qemu-aarch64-softmmu" | grep -c x-host-vfp)"
       - name: Generate project
         run: |
           bash ios/scripts/gen_sysroot_xcconfig.sh ios/sysroot-iOS-arm64

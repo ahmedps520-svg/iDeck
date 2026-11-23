@@ -122,6 +122,7 @@ struct VMConfig: Codable {
     var cpus: Int
     var tbCacheMb: UInt64
     var cpuModel: String
+    var hostVfp = false
     var multithreadTcg = true
     var splitWx = true
     var ramFile: String = ""

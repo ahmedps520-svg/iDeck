@@ -79,7 +79,8 @@ jobs:
           mkdir -p build/parsers
           swiftc -warnings-as-errors -o build/parsers/log_parsers \
             ios/iDeck/Runtime/LogParsers.swift ios/iDeck/Runtime/SigningProfile.swift ios/iDeck/Runtime/ShmGroup.swift \
-            ios/iDeck/Runtime/BlockStats.swift ios/tests/log_parsers/main.swift
+            ios/iDeck/Runtime/BlockStats.swift ios/iDeck/Runtime/EngineGuard.swift \
+            ios/tests/log_parsers/main.swift
       - name: Run
         run: build/parsers/log_parsers
 

@@ -232,6 +232,8 @@ def main() -> int:
     ap.add_argument("--memory", type=int, default=4096)
     ap.add_argument("--cpus", type=int, default=4)
     ap.add_argument("--cpu-model", default="neoverse-n1")
+    ap.add_argument("--host-vfp", action="store_true",
+                    help="guest FP/SIMD instructions on the host CPU (needs --qemu built with engine/qemu)")
     ap.add_argument("--data-size-gb", type=int, default=24)
     ap.add_argument("--timeout-boot", type=int, default=1800)
     ap.add_argument("--timeout-provision", type=int, default=5400)
@@ -281,7 +283,8 @@ def main() -> int:
     cfg = {
         "profile": "desktop-test", "kernel": str(a.runtime / "Image"), "initrd": str(a.runtime / "initrd.img"),
         "system_disk": str(system), "data_disk": str(data), "guest_mb": a.memory, "cpus": a.cpus,
-        "tb_cache_mb": a.tb_cache_mb, "cpu_model": a.cpu_model, "gl": False, "vulkan": False,
+        "tb_cache_mb": a.tb_cache_mb, "cpu_model": a.cpu_model, "host_vfp": a.host_vfp,
+        "gl": False, "vulkan": False,
         "qmp_socket": str(run / "q.sock"), "control_socket": str(run / "c.sock"),
         "input_socket": str(run / "i.sock"), "console_log": str(a.report / "console.log"), "audio": "none",
     }

@@ -34,6 +34,10 @@ final class AppModel: ObservableObject {
         installer = Installer(runtime: rt)
         library = LibraryModel(runtime: rt)
         UIApplication.shared.isIdleTimerDisabled = false
+        NotificationCenter.default.addObserver(forName: Settings.changedOnDisk, object: nil,
+                                               queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.settings = Settings.load() }
+        }
     }
 
     /// The home screen's main action.

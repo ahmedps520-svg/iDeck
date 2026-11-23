@@ -468,6 +468,24 @@ final class RuntimeController: ObservableObject {
         if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
         cfg.audio = s.audio ? "hda" : "none"
         cfg.splitWx = RuntimeController.edition == "jit"
+        // Native floating point needs iDeck's patched QEMU, which only the
+        // JIT edition embeds (the interpreter edition uses UTM's build).
+        let nativeFP = EngineGuard.decide(settingOn: s.nativeFloatingPoint,
+                                          supported: RuntimeController.edition == "jit",
+                                          unfinishedStarts: EngineGuard.unfinishedStarts(Paths.nativeFPMarker))
+        if nativeFP.switchSettingOff {
+            var changed = Settings.load()
+            changed.nativeFloatingPoint = false
+            changed.save()
+            NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
+            EngineGuard.clear(Paths.nativeFPMarker)
+            warnings.append("Native floating point was switched off: Linux did not finish starting with it "
+                            + "the last \(EngineGuard.maxUnfinishedStarts) times. You can switch it back on in Settings \u{203A} Advanced.")
+            DiagLog.write("engine: native floating point switched off after \(EngineGuard.maxUnfinishedStarts) unfinished starts")
+        }
+        cfg.hostVfp = nativeFP.useNativeFP
+        if nativeFP.useNativeFP { EngineGuard.noteStart(Paths.nativeFPMarker) }
+        DiagLog.write("engine: native floating point \(nativeFP.useNativeFP ? "on (x-host-vfp)" : "off")")
         if s.ramInFile {
             // Guest RAM as a shared file mapping: iPadOS can write those pages
             // back to disk and drop them, and they are not charged to the app's
@@ -616,6 +634,7 @@ final class RuntimeController: ObservableObject {
         case "ready":
             DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")"
                           + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
+            EngineGuard.clear(Paths.nativeFPMarker)
             DiagLog.write("address space with Linux running: \(IDPlatform.addressSpaceSummary)")
             DiagLog.write(IDPlatform.raiseVCPUThreadQoS())
             logDiskStats(after: [180, 600])

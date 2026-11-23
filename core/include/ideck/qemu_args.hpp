@@ -32,6 +32,11 @@ struct VmConfig {
     int cpus = 4;
     uint64_t tb_cache_mb = 384;
     std::string cpu_model = "neoverse-n1";
+    // Run the guest's floating-point and AdvSIMD instructions on the host
+    // CPU instead of QEMU's softfloat helpers ("-cpu ...,x-host-vfp=on").
+    // Only a QEMU built with engine/qemu/*.patch has the property; any
+    // other QEMU refuses to start with it.
+    bool host_vfp = false;
     bool multithread_tcg = true;
     // JIT obtained through a debugger on TXM devices maps code through a
     // RW/RX mirror (QEMU split-wx). Required unless the app holds the

@@ -2,6 +2,10 @@ import Foundation
 
 /// User settings, persisted as JSON in the state directory.
 struct Settings: Codable, Equatable {
+    /// Posted after code outside the app model saved changed settings, so
+    /// the model reloads them instead of writing its stale copy back.
+    static let changedOnDisk = Notification.Name("IDeckSettingsChangedOnDisk")
+
     enum PerformanceProfile: String, Codable, CaseIterable, Identifiable {
         case balanced, performance, batterySaver
         var id: String { rawValue }
@@ -33,6 +37,13 @@ struct Settings: Codable, Equatable {
     /// build 34: FEAT_MOPS lets glibc copy memory with QEMU's host memmove.
     /// CI 2026-11-23: glibc memcpy +23-40%, FP +12-23%, Steam unchanged.
     var cpuModel = "max"
+    /// Linux's floating-point and SIMD instructions run on the iPad's CPU
+    /// instead of in QEMU's software helpers (iDeck's engine patch, build
+    /// 35+, sideload edition). CI on an ARM64 host: every listed
+    /// instruction gives the same bits as hardware; see docs/CPU_ENGINE.md.
+    /// RuntimeController turns it off by itself if Linux did not come up
+    /// with it.
+    var nativeFloatingPoint = true
     /// Settings written before version 2 had neoverse-n1 as the default CPU
     /// model; load() moves those to the new default once.
     var settingsVersion = 2

@@ -31,6 +31,8 @@ enum Paths {
     static var journal: URL { state.appendingPathComponent("install-journal.json") }
     static var installedManifest: URL { state.appendingPathComponent("manifest.json") }
     static var settingsFile: URL { state.appendingPathComponent("settings.json") }
+    /// Starts with native floating point that have not reached the guest agent (EngineGuard).
+    static var nativeFPMarker: URL { state.appendingPathComponent("native-fp-starts") }
     /// Scratch backing for guest RAM (Settings.ramInFile): in Caches, so it
     /// is never backed up; recreated empty at every boot.
     static var guestRAMFile: URL {
