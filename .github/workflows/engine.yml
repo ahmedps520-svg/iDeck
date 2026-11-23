@@ -126,7 +126,7 @@ jobs:
       - name: Compare with hardware
         run: |
           python engine/compare.py --native out/native --off out/vfp-off --on out/vfp-on \
-            --md "$GITHUB_STEP_SUMMARY"
+            --strict-flags --md "$GITHUB_STEP_SUMMARY"
       - name: Dump differences
         if: always() && inputs.fpdump != ''
         run: |

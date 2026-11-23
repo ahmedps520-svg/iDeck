@@ -1,8 +1,55 @@
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+index 7c89785..27ce4f0 100644
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -18,6 +18,7 @@
+  */
+ 
+ #include "qemu/osdep.h"
++#include "fpu/softfloat.h"
+ 
+ #include "trace.h"
+ #include "disas/disas.h"
+@@ -288,9 +289,9 @@ static int setjmp_gen_code(CPUArchState *env, TranslationBlock *tb,
+ }
+ 
+ /* Called with mmap_lock held for user mode emulation.  */
+-TranslationBlock *tb_gen_code(CPUState *cpu,
+-                              vaddr pc, uint64_t cs_base,
+-                              uint32_t flags, int cflags)
++static TranslationBlock *tb_gen_code_1(CPUState *cpu,
++                                       vaddr pc, uint64_t cs_base,
++                                       uint32_t flags, int cflags)
+ {
+     CPUArchState *env = cpu_env(cpu);
+     TranslationBlock *tb, *existing_tb;
+@@ -576,6 +577,21 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
+     return tb;
+ }
+ 
++/*
++ * Translation is host code and may do floating-point arithmetic of its
++ * own; see float_host_flags_live.
++ */
++TranslationBlock *tb_gen_code(CPUState *cpu,
++                              vaddr pc, uint64_t cs_base,
++                              uint32_t flags, int cflags)
++{
++    uint64_t host_flags = float_host_flags_save();
++    TranslationBlock *tb = tb_gen_code_1(cpu, pc, cs_base, flags, cflags);
++
++    float_host_flags_restore(host_flags);
++    return tb;
++}
++
+ /* user-mode: call with mmap_lock held */
+ void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr)
+ {
 diff --git a/fpu/softfloat.c b/fpu/softfloat.c
-index 34c962d..c2de039 100644
+index 34c962d..f79c267 100644
 --- a/fpu/softfloat.c
 +++ b/fpu/softfloat.c
-@@ -227,13 +227,20 @@ GEN_INPUT_FLUSH3(float64_input_flush3, float64)
+@@ -227,13 +227,21 @@ GEN_INPUT_FLUSH3(float64_input_flush3, float64)
  # define QEMU_SOFTFLOAT_ATTR QEMU_FLATTEN __attribute__((noinline))
  #endif
  
@@ -11,6 +58,7 @@ index 34c962d..c2de039 100644
 + * (target/arm host_vfp passes the guest FPCR through to the host).
 + */
 +__thread bool float_host_rounding_altered;
++__thread bool float_host_flags_live;
 +
  static inline bool can_use_fpu(const float_status *s)
  {
@@ -25,10 +73,10 @@ index 34c962d..c2de039 100644
  
  /*
 diff --git a/include/fpu/softfloat.h b/include/fpu/softfloat.h
-index c18ab2c..984f593 100644
+index c18ab2c..7b0f082 100644
 --- a/include/fpu/softfloat.h
 +++ b/include/fpu/softfloat.h
-@@ -97,6 +97,12 @@ typedef enum {
+@@ -97,6 +97,43 @@ typedef enum {
  #include "fpu/softfloat-helpers.h"
  #include "qemu/int128.h"
  
@@ -37,6 +85,37 @@ index c18ab2c..984f593 100644
 + * round-to-nearest; the host-FPU fast paths are then skipped.
 + */
 +extern __thread bool float_host_rounding_altered;
++
++/*
++ * True while the host FP status register of this thread accumulates the
++ * guest's exception flags (target/arm host_vfp).  Host code that does
++ * floating-point arithmetic of its own while that is so (GLib resizing
++ * a hash table during translation, for one) brackets itself with
++ * float_host_flags_save/restore, so that its flags do not become the
++ * guest's.
++ */
++extern __thread bool float_host_flags_live;
++
++static inline uint64_t float_host_flags_save(void)
++{
++#ifdef __aarch64__
++    if (float_host_flags_live) {
++        uint64_t v;
++        asm volatile("mrs %0, fpsr" : "=r"(v));
++        return v;
++    }
++#endif
++    return 0;
++}
++
++static inline void float_host_flags_restore(uint64_t saved)
++{
++#ifdef __aarch64__
++    if (float_host_flags_live) {
++        asm volatile("msr fpsr, %0" : : "r"(saved));
++    }
++#endif
++}
 +
  /*----------------------------------------------------------------------------
  | Routine to raise any or all of the software IEC/IEEE floating-point
@@ -750,10 +829,10 @@ index 0000000..10f6777
 +    { 0xbfe08c00, 0x0e000000, 0x001078 }, /* TBL_TBX */
 diff --git a/target/arm/tcg/host-vfp.c b/target/arm/tcg/host-vfp.c
 new file mode 100644
-index 0000000..2089038
+index 0000000..092abb1
 --- /dev/null
 +++ b/target/arm/tcg/host-vfp.c
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,192 @@
 +/*
 + * AArch64 guest FP/AdvSIMD instructions run on an AArch64 host (iDeck):
 + * host FPCR/FPSR management.  See host-vfp.h.
@@ -906,6 +985,7 @@ index 0000000..2089038
 +    saved_fpcr = host_fpcr_read();
 +    saved_fpsr = host_fpsr_read();
 +    live_env = env;
++    float_host_flags_live = true;
 +    host_fpsr_write(0);
 +    host_fpcr_apply(env);
 +}
@@ -917,6 +997,7 @@ index 0000000..2089038
 +    }
 +    env->vfp.fpsr |= host_fpsr_read() & HOST_FPSR_CEXC;
 +    live_env = NULL;
++    float_host_flags_live = false;
 +    float_host_rounding_altered = false;
 +    host_fpsr_write(saved_fpsr);
 +    host_fpcr_write(saved_fpcr);
