@@ -50,6 +50,10 @@ struct Settings: Codable, Equatable {
     /// LIBGL_KOPPER_DISABLE). Software drawing costs the emulated CPU the most.
     /// Needs Vulkan in Linux (build 31+). Overrides the software setting.
     var steamGpuUI = false
+    /// Turns on Steam's own Low Performance and Low Bandwidth library modes
+    /// (no animations, blur or trailers; smaller images) before Steam starts.
+    /// Needs runtime 0.1.11. Off leaves those Steam settings as they are.
+    var steamLightLibrary = true
     /// Skips Steam's Friends and Chat UI (-nofriendsui -nochatui): fewer
     /// web views for the emulated CPU to run. Needs runtime 0.1.6.
     var steamLightweight = true

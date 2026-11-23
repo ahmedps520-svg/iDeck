@@ -20,6 +20,7 @@ IDECK_MANGOHUD=0
 IDECK_STEAM_LIGHT=1
 IDECK_STEAM_SMALL=0
 IDECK_STEAM_PIN=0
+IDECK_STEAM_LIGHT_LIBRARY=1
 IDECK_STEAM_WEBHELPER_GL=
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
@@ -52,6 +53,13 @@ if ! "${bootstrap[@]}" --check; then
     else
         "${bootstrap[@]}"
     fi
+fi
+
+# Steam's own Low Performance and Low Bandwidth library modes for every
+# signed-in account (no animations, blur or trailers; smaller images).
+# Written before each start because Steam reads them at start.
+if [ "$IDECK_STEAM_LIGHT_LIBRARY" = 1 ]; then
+    python3 /usr/lib/ideck/steam_prefs.py --light || true
 fi
 
 args=(-noverifyfiles)

@@ -775,10 +775,11 @@ final class RuntimeController: ObservableObject {
         let software = s.steamSoftwareUI && !gpuUI
         let options: [String: Any] = ["bigpicture": s.steamBigPicture, "beta": s.steamBeta,
                                       "cef_software": software, "webhelper_zink": gpuUI,
-                                      "overlay": s.showPerformanceOverlay,
+                                      "overlay": s.showPerformanceOverlay, "light_library": s.steamLightLibrary,
                                       "lightweight": s.steamLightweight, "small_mode": s.steamSmallMode]
         let signature = "bigpicture=\(s.steamBigPicture) beta=\(s.steamBeta) cef_software=\(software)"
-            + " gpu_ui=\(gpuUI) lightweight=\(s.steamLightweight) small_mode=\(s.steamSmallMode)"
+            + " gpu_ui=\(gpuUI) light_library=\(s.steamLightLibrary) lightweight=\(s.steamLightweight)"
+            + " small_mode=\(s.steamSmallMode)"
         guard (try? await agent.request("steam.configure", options)) != nil else { return }
         let applied = UserDefaults.standard.string(forKey: RuntimeController.appliedSteamOptionsKey)
         guard applied != signature else { return }

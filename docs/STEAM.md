@@ -38,7 +38,7 @@ Build 29 with runtime 0.1.9.
 - while the iPad showed iDeck's own screens;
 - behind a running game, where it competed with the game for the vCPUs.
 
-**What the app tells Linux.** The app sends what the iPad shows to `steam-ui-daemon` (agent operation `steam.ui`):
+**What the app tells Linux.** The app sends what the iPad shows to the guest agent (operation `steam.ui`). The agent's `SteamUi` (`guest/agent/steam_ui.cpp`, runtime 0.1.11+) applies it; runtime 0.1.9 and 0.1.10 used a shell daemon, `steam-ui-daemon`:
 
 | State | When | What Linux does |
 |---|---|---|
@@ -51,6 +51,20 @@ Build 29 with runtime 0.1.9.
 - `steamwebhelper` threads run at nice 19 unless Steam is on screen with no game running. The daemon does not use SCHED_IDLE: under full game load that could starve Steam until it reports "steamwebhelper is not responding".
 - When the game process (Steam's `reaper SteamLaunch AppId=…`) ends, the app switches back to `visible`. It does the same if no game process appears within 90 s, so you see whatever Steam is showing.
 - You can bring Steam back at any time with **⋯ › Show Steam**. The behaviour can be turned off in Settings › Steam.
+
+**Cost of the bookkeeping.**
+- The shell daemon checked every 3 s, starting `pgrep`, `runuser` (a PAM session each time) and `xdotool`. In CI it used 7–15% of a vCPU (agent `top`).
+- The agent reads `/proc` directly and sets nice with `setpriority()`. It runs `xdotool` only on a state change, and every 6 s while away, as root: the X session allows `localuser:root`.
+- CI run 45183440240, software UI, sign-in window: guest CPU 6.3% shown, 7.3% hidden, 6.3% shown again. Runtime 0.1.10's software-UI run measured 11.6%, 9.6% and 10.3%. The window was minimised and restored as before.
+
+## GPU-drawn Steam UI (experimental, build 33+)
+
+Settings › Steam › **GPU-drawn Steam UI** starts Steam without `-cef-disable-gpu`, and gives only `steamwebhelper` `MESA_LOADER_DRIVER_OVERRIDE=zink` (set in `steam-path/taskset`).
+- Chromium's OpenGL then runs on Vulkan through Mesa's Zink, which on the iPad means Venus and MoltenVK on Metal, instead of drawing on the emulated CPU.
+- Valve's ARM64 `steamwebhelper.sh` sets `LIBGL_KOPPER_DISABLE=true`, a Zink option. That suggests Valve runs Steam's UI on Zink on Steam Frame.
+- It needs Vulkan in Linux. Before build 31, long app-group names broke it (see [PERFORMANCE](PERFORMANCE.md)).
+- Off by default; not yet tried on an iPad.
+- The agent operation `steam.webhelpers` lists each Chromium process with the graphics libraries it loaded. A Vulkan ICD (`libvulkan_virtio`) in the GPU process means Zink is in use.
 
 ## Sign-in
 

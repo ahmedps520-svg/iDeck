@@ -31,7 +31,7 @@
 - **Memory:** jetsam-aware guest sizing; a bounded TCG cache; balloon with free-page reporting; on pressure the guest drops caches, the balloon inflates, disks sync and UI caches are released. Journald runs in RAM; `vm.swappiness=0`.
 - **CPU:** MTTCG; the `neoverse-n1` model avoids PAuth/SVE emulation costs (V1, N2 and A710 start with `pauth=off,sve=off` since build 28); performance profiles set 2, 4 or 6 vCPUs; the agent's input path runs on its own thread.
 - **Kernel:** `mitigations=off nowatchdog kpti=0 transparent_hugepage=never`. `kpti=0` (build 28 / runtime 0.1.9) made system calls 7× faster in CI; see below.
-- **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9, `steam-ui-daemon`):
+- **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9; in the guest agent from runtime 0.1.11, which halved its own overhead, see [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen)):
   - Steam's windows are minimised while the iPad shows iDeck's screens or a game, so Chromium stops drawing them.
   - `steamwebhelper` runs at nice 19 during games.
   - CI, sign-in window: guest CPU 22.5% shown, 13.5% hidden, 18.5% shown again (4 vCPUs, 60 s averages).
@@ -144,6 +144,36 @@ QEMU translates guest code into a fixed buffer (`-accel tcg,tb-size=`). When the
 **Build 31** plans the cache from the memory headroom: 512, 768 or 1024 MiB, whichever still fits the limit. The iPad run of build 30 had 11 GB of headroom (limit 12288 MiB, footprint about 1.1 GB).
 
 **Why not 2 GiB.** The cap is 1024 MiB because split-wx maps the buffer twice, and iDeck runs without the extended-virtual-addressing entitlement. The boot log now records the address space (`address space with Linux running:`), so 2 GiB can be decided on device data.
+
+## CPU model `max` and glibc `memcpy` (CI, 2026-11-23)
+
+`ideck-bench` is a static musl binary, so its `mem_bandwidth` never measured glibc. The new `mem_copy_glibc` result times a Python buffer copy, which goes through glibc's `memcpy`/`memmove`. With FEAT_MOPS (QEMU's `max` model), glibc 2.41 uses CPYP/CPYM/CPYE, which QEMU implements with a host memmove.
+
+Run 45183440240, `--bench-only` boots, 4 vCPUs, `kpti=0`:
+
+| | n1 | max (PAuth/SVE/SME off) | n1 again |
+|---|---|---|---|
+| mem_copy_glibc | 2,698 MB/s | **3,843 MB/s** | 2,732 MB/s |
+| mem_bandwidth (musl) | 852 | 886 | 891 |
+| int_single | 2,902 | 3,070 | 2,597 |
+| fp_single | 158 | 182 | 162 |
+| mem_latency | 210 ns | 227 ns | 202 ns |
+
+So glibc copies are about 40% faster on `max`. The other differences are within run-to-run noise. Steam on `max` needs a full boot test before it can become the default.
+
+## Lean Chromium options: no gain (CI, 2026-11-23)
+
+Tested: `-cef-disable-site-isolation -cef-force-opaque-backgrounds -cef-disable-js-logging -cef-disable-logging`, all accepted by the ARM64 client.
+- In an A/B within one VM (run 45183440240), the sign-in window took 60.5 s without them and 60.6 s with them.
+- The web helper used 7 processes and 1534 MB without them, and 8 processes and 1450 MB with them.
+- Not used.
+
+## Logged on the iPad from build 33
+
+The questions above can only be answered on the device. `ideck.log` now records:
+- `address space with Linux running:` (TASK_VM_INFO), which decides whether the TCG cache can go to 2 GiB.
+- `vCPU threads (base priority):` for each QEMU `CPU n/TCG` thread. A thread below user-interactive (47) gets a QoS override, so iOS prefers the performance cores; the line shows whether that was needed.
+- `disks after 3 min` / `after 10 min:` flush operations and their total time from QMP `query-blockstats`. Each flush is an F_FULLFSYNC of the image; if these add up to many seconds, `cache=unsafe` would be worth its risk.
 
 ## Device run, build 30 (iPad17,2, iPadOS 27.2, paid Apple ID, 2026-11-22)
 

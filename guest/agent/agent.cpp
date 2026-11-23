@@ -248,6 +248,9 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_STEAM_SMALL=") + (a["small_mode"].as_bool(false) ? "1" : "0") + "\n";
         // Keep Steam's own CPU pinning of steamwebhelper (only for A/B tests).
         env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
+        // Steam's Low Performance and Low Bandwidth library modes (steam_prefs.py).
+        // On unless the app says otherwise (builds before 33 do not send it).
+        env += std::string("IDECK_STEAM_LIGHT_LIBRARY=") + (a["light_library"].as_bool(true) ? "1" : "0") + "\n";
         // Experimental: steamwebhelper's OpenGL through Zink (Vulkan/Venus).
         env += std::string("IDECK_STEAM_WEBHELPER_GL=") + (a["webhelper_zink"].as_bool(false) ? "zink" : "") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library

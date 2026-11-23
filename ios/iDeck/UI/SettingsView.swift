@@ -52,6 +52,8 @@ struct SettingsView: View {
                 }
                 Toggle("Lightweight Steam (no Friends & Chat, no web sandbox)", isOn: $model.settings.steamLightweight)
                     .onChange(of: model.settings.steamLightweight) { _ in applySteam() }
+                Toggle("Light library (Steam's Low Performance and Low Bandwidth modes)", isOn: $model.settings.steamLightLibrary)
+                    .onChange(of: model.settings.steamLightLibrary) { _ in applySteam() }
                 Toggle("Compact library (Steam Small Mode)", isOn: $model.settings.steamSmallMode)
                     .onChange(of: model.settings.steamSmallMode) { _ in applySteam() }
                 Toggle("Pause Steam's window when it is not on screen", isOn: $model.settings.steamInBackground)
