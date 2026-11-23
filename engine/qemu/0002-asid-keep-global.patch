@@ -1,11 +1,16 @@
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 1040af2..cc93bcf 100644
+index 1040af2..1d38f00 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
-@@ -417,6 +417,63 @@ void tlb_flush(CPUState *cpu)
+@@ -417,6 +417,68 @@ void tlb_flush(CPUState *cpu)
      tlb_flush_by_mmuidx(cpu, ALL_MMUIDX_BITS);
  }
  
++static inline bool tlb_entry_in_use(const CPUTLBEntry *te)
++{
++    return te->addr_read != -1 || te->addr_write != -1 || te->addr_code != -1;
++}
++
 +/* The page address of an entry in use, with its flag bits. */
 +static inline vaddr tlb_entry_any_addr(const CPUTLBEntry *te)
 +{
@@ -43,7 +48,7 @@ index 1040af2..cc93bcf 100644
 +        for (size_t i = 0; i < n; i++) {
 +            CPUTLBEntry *te = &fast->table[i];
 +
-+            if (!tlb_entry_is_empty(te) && !(tlb_entry_any_addr(te) & high)) {
++            if (tlb_entry_in_use(te) && !(tlb_entry_any_addr(te) & high)) {
 +                memset(te, -1, sizeof(*te));
 +                desc->n_used_entries--;
 +            }
@@ -51,7 +56,7 @@ index 1040af2..cc93bcf 100644
 +        for (size_t k = 0; k < CPU_VTLB_SIZE; k++) {
 +            CPUTLBEntry *te = &desc->vtable[k];
 +
-+            if (!tlb_entry_is_empty(te) && !(tlb_entry_any_addr(te) & high)) {
++            if (tlb_entry_in_use(te) && !(tlb_entry_any_addr(te) & high)) {
 +                memset(te, -1, sizeof(*te));
 +                desc->n_used_entries--;
 +            }

@@ -1342,7 +1342,7 @@ index 39f01c1..3048e4a 100644
  #define TCG_TARGET_sextract_valid(type, ofs, len)  1
  #define TCG_TARGET_deposit_valid(type, ofs, len)   1
 diff --git a/tcg/aarch64/tcg-target.c.inc b/tcg/aarch64/tcg-target.c.inc
-index 4645242..312dc61 100644
+index 4645242..b4210f5 100644
 --- a/tcg/aarch64/tcg-target.c.inc
 +++ b/tcg/aarch64/tcg-target.c.inc
 @@ -11,6 +11,7 @@
@@ -1353,15 +1353,10 @@ index 4645242..312dc61 100644
  
  /* Used for function call generation. */
  #define TCG_REG_CALL_STACK              TCG_REG_SP
-@@ -1255,6 +1256,79 @@ static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
+@@ -1255,6 +1256,74 @@ static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
      return true;
  }
  
-+static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret,
-+                       TCGReg base, intptr_t ofs);
-+static void tcg_out_st(TCGContext *s, TCGType type, TCGReg src,
-+                       TCGReg base, intptr_t ofs);
-+
 +/*
 + * INDEX_op_host_vfp: run one host FP/AdvSIMD instruction on guest
 + * registers in env.  Only reserved registers are used (the slot
@@ -1433,7 +1428,7 @@ index 4645242..312dc61 100644
  static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret,
                         TCGReg base, intptr_t ofs)
  {
-@@ -3182,15 +3256,29 @@ static void tcg_target_init(TCGContext *s)
+@@ -3182,15 +3251,29 @@ static void tcg_target_init(TCGContext *s)
      tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP1);
      tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP2);
      tcg_regset_set_reg(s->reserved_regs, TCG_VEC_TMP0);
@@ -1463,7 +1458,7 @@ index 4645242..312dc61 100644
        + TCG_TARGET_STACK_ALIGN - 1) \
       & ~(TCG_TARGET_STACK_ALIGN - 1))
  
-@@ -3227,6 +3315,12 @@ static void tcg_target_qemu_prologue(TCGContext *s)
+@@ -3227,6 +3310,12 @@ static void tcg_target_qemu_prologue(TCGContext *s)
      tcg_set_frame(s, TCG_REG_SP, TCG_STATIC_CALL_ARGS_SIZE,
                    CPU_TEMP_BUF_NLONGS * sizeof(long));
  
@@ -1476,7 +1471,7 @@ index 4645242..312dc61 100644
      if (!tcg_use_softmmu) {
          /*
           * Note that XZR cannot be encoded in the address base register slot,
-@@ -3253,6 +3347,12 @@ static void tcg_target_qemu_prologue(TCGContext *s)
+@@ -3253,6 +3342,12 @@ static void tcg_target_qemu_prologue(TCGContext *s)
      tb_ret_addr = tcg_splitwx_to_rx(s->code_ptr);
      tcg_out_bti(s, BTI_J);
  
