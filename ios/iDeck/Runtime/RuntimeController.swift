@@ -596,6 +596,21 @@ final class RuntimeController: ObservableObject {
 
     // MARK: Events
 
+    /// Logs QEMU's disk counters (flushes above all, see BlockStats) at
+    /// these times after Linux is up, as long as the same QEMU still runs.
+    private func logDiskStats(after seconds: [Int]) {
+        Task { [weak self] in
+            var waited = 0
+            for s in seconds {
+                try? await Task.sleep(nanoseconds: UInt64(s - waited) * 1_000_000_000)
+                waited = s
+                guard let self, let qmp = self.qmp, case .running = self.phase,
+                      let reply = try? await qmp.execute("query-blockstats") else { return }
+                DiagLog.write("disks after \(s / 60) min: \(BlockStats.summary(BlockStats.parse(reply)))")
+            }
+        }
+    }
+
     private func agentEvent(_ event: String, _ data: [String: Any]) {
         switch event {
         case "ready":
@@ -603,6 +618,7 @@ final class RuntimeController: ObservableObject {
                           + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
             DiagLog.write("address space with Linux running: \(IDPlatform.addressSpaceSummary)")
             DiagLog.write(IDPlatform.raiseVCPUThreadQoS())
+            logDiskStats(after: [180, 600])
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running

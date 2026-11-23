@@ -137,6 +137,24 @@ if let w = weekly {
 check(SigningProfile.remaining(1800) == "less than an hour", "under an hour")
 check(SigningProfile.remaining(-1) == nil, "expired -> nil")
 
+// QMP query-blockstats (BlockStats.swift).
+let blockReply: Any = [
+    ["device": "system", "qdev": "/machine/peripheral-anon/device[1]/virtio-backend",
+     "stats": ["flush_operations": 1200, "flush_total_time_ns": 45_500_000_000, "wr_operations": 9000,
+               "wr_bytes": 314_572_800, "wr_total_time_ns": 12_000_000_000, "rd_operations": 4000,
+               "rd_bytes": 104_857_600, "rd_total_time_ns": 3_000_000_000]],
+    ["device": "", "qdev": "data-qdev", "stats": ["flush_operations": 3]],
+    ["device": "broken"],
+]
+let disks = BlockStats.parse(blockReply)
+check(disks.count == 2, "two disks with stats, got \(disks.count)")
+check(disks.first?.name == "system" && disks.first?.flushes == 1200 && disks.first?.flushSeconds == 45.5,
+      "system disk flushes: \(String(describing: disks.first))")
+check(disks.last?.name == "data-qdev" && disks.last?.flushes == 3 && disks.last?.writeMB == 0, "qdev fallback name")
+check(BlockStats.summary(disks).hasPrefix("system: flush 1200 ops 45.5 s, write 9000 ops 300 MB 12.0 s, read 4000 ops 100 MB 3.0 s"),
+      "summary: \(BlockStats.summary(disks))")
+check(BlockStats.parse("nonsense").isEmpty && BlockStats.summary([]) == "no disks reported", "bad reply")
+
 // APP_SANDBOX_GROUP_ID for QEMU (ShmGroup.swift).
 check(ShmGroup.forQEMU(usable: "group.ideck.ABCDE12345", fileFallback: false) == "group.ideck.ABCDE12345",
       "a working app group is passed on")

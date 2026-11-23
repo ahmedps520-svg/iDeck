@@ -445,6 +445,15 @@ def main() -> int:
                 stats = {"error": str(e)}
             report.setdefault("jit", {})[label] = stats
             log(f"jit-{label}", stats)
+            # Disk flushes so far (each one is a host fsync of the image).
+            try:
+                disks = {d.get("device") or d.get("qdev"): {k: d["stats"].get(k) for k in
+                         ("flush_operations", "flush_total_time_ns", "wr_operations", "wr_bytes")}
+                         for d in qmp.run("query-blockstats") or [] if "stats" in d}
+                report.setdefault("disks", {})[label] = disks
+                log(f"disks-{label}", disks)
+            except Exception as e:  # noqa: BLE001
+                log(f"disks-{label}", str(e), ok=False)
             return stats
 
         def top(label: str) -> dict:
