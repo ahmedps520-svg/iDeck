@@ -101,8 +101,12 @@ if ! diff -u "$WORK/imports-utm.txt" "$WORK/imports-new.txt"; then
     echo "error: the rebuilt QEMU links a different set of libraries than UTM's" >&2
     exit 1
 fi
-strings -a "$BIN" | grep -q 'x-host-vfp' || {
-    echo "error: the rebuilt QEMU does not contain the engine patches" >&2; exit 1; }
+# grep -c reads all of its input; with -q, strings would die of SIGPIPE and
+# pipefail would report that as a failure.
+if [ "$(strings -a "$BIN" | grep -c 'x-host-vfp')" -eq 0 ]; then
+    echo "error: the rebuilt QEMU does not contain the engine patches" >&2
+    exit 1
+fi
 lipo -archs "$BIN"
 ls -la "$BIN"
 echo "QEMU rebuilt with ${#PATCHES[@]} engine patch(es): $FW"
