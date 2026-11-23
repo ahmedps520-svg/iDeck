@@ -107,19 +107,19 @@ index 8125f68..1f195c1 100644
   * tlb_flush_by_mmuidx_all_cpus_synced:
   * @cpu: Originating CPU of the flush
 diff --git a/target/arm/cpu.c b/target/arm/cpu.c
-index 8f71902..ab10ded 100644
+index d02cce9..bf07eb5 100644
 --- a/target/arm/cpu.c
 +++ b/target/arm/cpu.c
-@@ -2674,6 +2674,7 @@ static const Property arm_cpu_properties[] = {
-     /* True to default to the backward-compat old CNTFRQ rather than 1Ghz */
+@@ -2675,6 +2675,7 @@ static const Property arm_cpu_properties[] = {
      DEFINE_PROP_BOOL("backcompat-cntfrq", ARMCPU, backcompat_cntfrq, false),
      DEFINE_PROP_BOOL("x-host-vfp", ARMCPU, host_vfp, false),
+     DEFINE_PROP_UINT64("x-host-vfp-debug", ARMCPU, host_vfp_debug, 0),
 +    DEFINE_PROP_BOOL("x-asid-keep-global", ARMCPU, asid_keep_global, false),
      DEFINE_PROP_BOOL("backcompat-pauth-default-use-qarma5", ARMCPU,
                        backcompat_pauth_default_use_qarma5, false),
  };
 diff --git a/target/arm/cpu.h b/target/arm/cpu.h
-index cbc3bb3..bab9df9 100644
+index 361f793..88b8f6d 100644
 --- a/target/arm/cpu.h
 +++ b/target/arm/cpu.h
 @@ -701,6 +701,14 @@ typedef struct CPUArchState {
@@ -137,9 +137,9 @@ index cbc3bb3..bab9df9 100644
      uint64_t exclusive_addr;
      uint64_t exclusive_val;
      /*
-@@ -1021,6 +1029,13 @@ struct ArchCPU {
+@@ -1028,6 +1036,13 @@ struct ArchCPU {
       */
-     bool host_vfp;
+     uint64_t host_vfp_debug;
  
 +    /*
 +     * QOM property x-asid-keep-global: when the guest changes the ASID

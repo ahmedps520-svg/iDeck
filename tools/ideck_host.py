@@ -232,6 +232,8 @@ def main() -> int:
     ap.add_argument("--memory", type=int, default=4096)
     ap.add_argument("--cpus", type=int, default=4)
     ap.add_argument("--cpu-model", default="neoverse-n1")
+    ap.add_argument("--cpu-extra", default="",
+                    help="appended to QEMU's -cpu value, e.g. x-host-vfp-debug=1 (engine diagnostics)")
     ap.add_argument("--tlb-keep-global", action="store_true",
                     help="keep kernel TLB entries across process switches (needs --qemu built with engine/qemu)")
     ap.add_argument("--host-vfp", action="store_true",
@@ -293,6 +295,9 @@ def main() -> int:
     }
     argv = core.call("qemu.args", cfg)["argv"]
     argv[0] = a.qemu
+    if a.cpu_extra:
+        i = argv.index("-cpu") + 1
+        argv[i] = argv[i] + "," + a.cpu_extra
     if a.cmdline_remove or a.cmdline_add:
         i = argv.index("-append") + 1
         words = [w for w in argv[i].split() if w not in a.cmdline_remove]

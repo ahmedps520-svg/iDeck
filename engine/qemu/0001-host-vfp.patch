@@ -212,7 +212,7 @@ index 9f73771..1820b24 100644
  DEF(setcond_i32, 1, 2, 1, 0)
  DEF(negsetcond_i32, 1, 2, 1, 0)
 diff --git a/target/arm/cpu.c b/target/arm/cpu.c
-index 8834666..8f71902 100644
+index 8834666..d02cce9 100644
 --- a/target/arm/cpu.c
 +++ b/target/arm/cpu.c
 @@ -33,6 +33,8 @@
@@ -250,15 +250,16 @@ index 8834666..8f71902 100644
      if (!cpu->has_vfp) {
          uint64_t t;
          uint32_t u;
-@@ -2652,6 +2673,7 @@ static const Property arm_cpu_properties[] = {
+@@ -2652,6 +2673,8 @@ static const Property arm_cpu_properties[] = {
      DEFINE_PROP_INT32("core-count", ARMCPU, core_count, -1),
      /* True to default to the backward-compat old CNTFRQ rather than 1Ghz */
      DEFINE_PROP_BOOL("backcompat-cntfrq", ARMCPU, backcompat_cntfrq, false),
 +    DEFINE_PROP_BOOL("x-host-vfp", ARMCPU, host_vfp, false),
++    DEFINE_PROP_UINT64("x-host-vfp-debug", ARMCPU, host_vfp_debug, 0),
      DEFINE_PROP_BOOL("backcompat-pauth-default-use-qarma5", ARMCPU,
                        backcompat_pauth_default_use_qarma5, false),
  };
-@@ -2682,6 +2704,26 @@ static const struct SysemuCPUOps arm_sysemu_ops = {
+@@ -2682,6 +2705,26 @@ static const struct SysemuCPUOps arm_sysemu_ops = {
  #endif
  
  #ifdef CONFIG_TCG
@@ -285,7 +286,7 @@ index 8834666..8f71902 100644
  static const TCGCPUOps arm_tcg_ops = {
      .initialize = arm_translate_init,
      .translate_code = arm_translate_code,
-@@ -2694,6 +2736,8 @@ static const TCGCPUOps arm_tcg_ops = {
+@@ -2694,6 +2737,8 @@ static const TCGCPUOps arm_tcg_ops = {
      .record_sigbus = arm_cpu_record_sigbus,
  #else
      .tlb_fill_align = arm_cpu_tlb_fill_align,
@@ -295,7 +296,7 @@ index 8834666..8f71902 100644
      .cpu_exec_halt = arm_cpu_exec_halt,
      .do_interrupt = arm_cpu_do_interrupt,
 diff --git a/target/arm/cpu.h b/target/arm/cpu.h
-index 611469f..cbc3bb3 100644
+index 611469f..361f793 100644
 --- a/target/arm/cpu.h
 +++ b/target/arm/cpu.h
 @@ -683,6 +683,12 @@ typedef struct CPUArchState {
@@ -311,7 +312,7 @@ index 611469f..cbc3bb3 100644
          uint32_t xregs[16];
  
          /* Scratch space for aa32 neon expansion.  */
-@@ -1008,6 +1014,13 @@ struct ArchCPU {
+@@ -1008,6 +1014,20 @@ struct ArchCPU {
      /* QOM property to indicate we should use the back-compat CNTFRQ default */
      bool backcompat_cntfrq;
  
@@ -321,6 +322,13 @@ index 611469f..cbc3bb3 100644
 +     * (AArch64 hosts with the TCG JIT only; see host-vfp.h).
 +     */
 +    bool host_vfp;
++    /*
++     * QOM property x-host-vfp-debug, for finding a faulty pattern:
++     * bit 0 disables the slot cache (every operand is loaded from env);
++     * bit 8+G leaves the patterns of group G (the table split into 24
++     * groups) to QEMU's own translation.
++     */
++    uint64_t host_vfp_debug;
 +
      /* QOM property to indicate we should use the back-compat QARMA5 default */
      bool backcompat_pauth_default_use_qarma5;
@@ -396,10 +404,10 @@ index 0000000..9df321f
 +#endif /* TARGET_ARM_HOST_VFP_H */
 diff --git a/target/arm/tcg/host-vfp-a64.c.inc b/target/arm/tcg/host-vfp-a64.c.inc
 new file mode 100644
-index 0000000..300c7ae
+index 0000000..d0f64f2
 --- /dev/null
 +++ b/target/arm/tcg/host-vfp-a64.c.inc
-@@ -0,0 +1,380 @@
+@@ -0,0 +1,391 @@
 +/*
 + * A64 FP/AdvSIMD instructions that run on an AArch64 host as they are
 + * (iDeck, "-cpu ...,x-host-vfp=on").  Included by translate-a64.c.
@@ -652,6 +660,14 @@ index 0000000..300c7ae
 +    flags = p->flags;
 +    kind = flags & HV_KIND_MASK;
 +
++    if (unlikely(s->host_vfp_debug)) {
++        unsigned group = (p - host_vfp_pats) * 24 / ARRAY_SIZE(host_vfp_pats);
++
++        if (s->host_vfp_debug & (1ull << (8 + group))) {
++            return false;
++        }
++    }
++
 +    /* Encodings the mask lets through that are unallocated. */
 +    if ((flags & HV_VEC_SD) && extract32(insn, 22, 1) && !extract32(insn, 30, 1)) {
 +        return false;
@@ -672,6 +688,9 @@ index 0000000..300c7ae
 +
 +    if (!fp_access_check(s)) {
 +        return true;
++    }
++    if (unlikely(s->host_vfp_debug & 1)) {
++        host_vfp_forget_all(s);
 +    }
 +
 +    /*
@@ -981,10 +1000,10 @@ index 0000000..293a525
 +    { 0xbfe08c00, 0x0e000000, 0x001078 }, /* TBL_TBX */
 diff --git a/target/arm/tcg/host-vfp.c b/target/arm/tcg/host-vfp.c
 new file mode 100644
-index 0000000..092abb1
+index 0000000..c3f4387
 --- /dev/null
 +++ b/target/arm/tcg/host-vfp.c
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,202 @@
 +/*
 + * AArch64 guest FP/AdvSIMD instructions run on an AArch64 host (iDeck):
 + * host FPCR/FPSR management.  See host-vfp.h.
@@ -1134,8 +1153,18 @@ index 0000000..092abb1
 +
 +void arm_host_vfp_exec_enter(CPUARMState *env)
 +{
-+    saved_fpcr = host_fpcr_read();
-+    saved_fpsr = host_fpsr_read();
++    if (live_env != NULL) {
++        /*
++         * The last cpu_exec on this thread left through a longjmp past
++         * the exit hook (cpu_exec_step_atomic does). The host registers
++         * still hold that guest's environment and flags, and saved_*
++         * still hold the thread's own.
++         */
++        live_env->vfp.fpsr |= host_fpsr_read() & HOST_FPSR_CEXC;
++    } else {
++        saved_fpcr = host_fpcr_read();
++        saved_fpsr = host_fpsr_read();
++    }
 +    live_env = env;
 +    float_host_flags_live = true;
 +    host_fpsr_write(0);
@@ -1190,7 +1219,7 @@ index dd12cce..5b18544 100644
    'pauth_helper.c',
    'sme_helper.c',
 diff --git a/target/arm/tcg/translate-a64.c b/target/arm/tcg/translate-a64.c
-index 05cdd2b..da06503 100644
+index 05cdd2b..6d358fd 100644
 --- a/target/arm/tcg/translate-a64.c
 +++ b/target/arm/tcg/translate-a64.c
 @@ -25,6 +25,8 @@
@@ -1202,7 +1231,7 @@ index 05cdd2b..da06503 100644
  
  static TCGv_i64 cpu_X[32];
  static TCGv_i64 cpu_pc;
-@@ -10171,6 +10173,19 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
+@@ -10171,6 +10173,20 @@ static void aarch64_tr_init_disas_context(DisasContextBase *dcbase,
      dc->nv2_mem_be = EX_TBFLAG_A64(tb_flags, NV2_MEM_BE);
      dc->fpcr_ah = EX_TBFLAG_A64(tb_flags, AH);
      dc->fpcr_nep = EX_TBFLAG_A64(tb_flags, NEP);
@@ -1213,6 +1242,7 @@ index 05cdd2b..da06503 100644
 +     */
 +    dc->host_vfp = arm_cpu->host_vfp && dc->vl == 16 &&
 +                   !dc_isar_feature(aa64_sme, dc);
++    dc->host_vfp_debug = arm_cpu->host_vfp_debug;
 +    for (int i = 0; i < ARRAY_SIZE(dc->hv_greg); i++) {
 +        dc->hv_greg[i] = -1;
 +        dc->hv_valid[i] = 0;
@@ -1222,7 +1252,7 @@ index 05cdd2b..da06503 100644
      dc->vec_len = 0;
      dc->vec_stride = 0;
      dc->cp_regs = arm_cpu->cp_regs;
-@@ -10230,6 +10245,19 @@ static void aarch64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
+@@ -10230,6 +10246,19 @@ static void aarch64_tr_insn_start(DisasContextBase *dcbase, CPUState *cpu)
      dc->insn_start_updated = false;
  }
  
@@ -1242,7 +1272,7 @@ index 05cdd2b..da06503 100644
  static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
  {
      DisasContext *s = container_of(dcbase, DisasContext, base);
-@@ -10316,10 +10344,17 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
+@@ -10316,10 +10345,17 @@ static void aarch64_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
          disas_sme_fa64(s, insn);
      }
  
@@ -1265,15 +1295,17 @@ index 05cdd2b..da06503 100644
  
      /*
 diff --git a/target/arm/tcg/translate.h b/target/arm/tcg/translate.h
-index 53e485d..9c0538f 100644
+index 53e485d..8151b3b 100644
 --- a/target/arm/tcg/translate.h
 +++ b/target/arm/tcg/translate.h
-@@ -163,6 +163,17 @@ typedef struct DisasContext {
+@@ -163,6 +163,19 @@ typedef struct DisasContext {
      bool fpcr_ah;
      /* True if FPCR.NEP is 1 (FEAT_AFP scalar upper-element result handling) */
      bool fpcr_nep;
 +    /* True if listed FP/AdvSIMD insns are emitted as host insns (x-host-vfp) */
 +    bool host_vfp;
++    /* ARMCPU::host_vfp_debug */
++    uint64_t host_vfp_debug;
 +    /*
 +     * Slot cache of host-vfp-a64.c.inc, valid within this TB: the guest V
 +     * register each host slot holds (-1: none), how much of it is known
