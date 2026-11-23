@@ -1,8 +1,8 @@
 diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
-index 1040af2..1d38f00 100644
+index 1040af2..357af92 100644
 --- a/accel/tcg/cputlb.c
 +++ b/accel/tcg/cputlb.c
-@@ -417,6 +417,68 @@ void tlb_flush(CPUState *cpu)
+@@ -417,6 +417,80 @@ void tlb_flush(CPUState *cpu)
      tlb_flush_by_mmuidx(cpu, ALL_MMUIDX_BITS);
  }
  
@@ -27,6 +27,7 @@ index 1040af2..1d38f00 100644
 +{
 +    const vaddr high = (vaddr)1 << bit;
 +    int64_t now = get_clock_realtime();
++    CPUJumpCache *jc;
 +    uint16_t work;
 +
 +    assert_cpu_is_self(cpu);
@@ -64,8 +65,19 @@ index 1040af2..1d38f00 100644
 +    }
 +    qemu_spin_unlock(&cpu->neg.tlb.c.lock);
 +
-+    /* A jump cache entry is found by virtual address alone. */
-+    tcg_flush_jmp_cache(cpu);
++    /*
++     * A jump cache entry is found by virtual address alone, so the
++     * entries for the flushed half must go. The others still name the
++     * same code: their translations were kept.
++     */
++    jc = cpu->tb_jmp_cache;
++    if (likely(jc != NULL)) {
++        for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
++            if (!(jc->array[i].pc & high)) {
++                qatomic_set(&jc->array[i].tb, NULL);
++            }
++        }
++    }
 +}
 +
  void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *src_cpu, uint16_t idxmap)
