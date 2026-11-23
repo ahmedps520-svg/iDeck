@@ -91,8 +91,10 @@ class PatternTable(unittest.TestCase):
                 self.assertEqual(insn & 31, spec.TEST_GPR)
             if pat.kind == spec.GPR_IN:
                 self.assertEqual((insn >> 5) & 31, spec.TEST_GPR)
-            if low:
+            if low and pat.field("d"):
                 self.assertLess(insn & 31, 8, hex(insn))
+            if low and pat.field("n"):
+                self.assertLess((insn >> 5) & 31, 8, hex(insn))
         self.assertEqual({c[1] for c in cases}, set(range(len(spec.PATTERNS))))
         self.assertGreater(sum(c[2] for c in cases), 1500)
 
