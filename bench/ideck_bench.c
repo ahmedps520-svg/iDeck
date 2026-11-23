@@ -475,12 +475,17 @@ static void bench_ctx_switch(const char* name, uint64_t rounds, int pages) {
     for (size_t i = 0; i < len; i += page) mem[i] = 1;
     unsigned char byte = 0;
     if (child == 0) {
+        /* Without the parent's ends: its close() must end our read(). */
+        close(ab[1]);
+        close(ba[0]);
         for (;;) {
             if (read(ab[0], &byte, 1) != 1) _exit(0);
             for (int i = 0; i < pages; ++i) byte += mem[(size_t)i * page];
             if (write(ba[1], &byte, 1) != 1) _exit(0);
         }
     }
+    close(ab[0]);
+    close(ba[1]);
     double t0 = now_s();
     uint64_t done = 0;
     for (; done < rounds; ++done) {
@@ -490,8 +495,6 @@ static void bench_ctx_switch(const char* name, uint64_t rounds, int pages) {
     double dt = now_s() - t0;
     close(ab[1]);
     close(ba[0]);
-    close(ab[0]);
-    close(ba[1]);
     waitpid(child, NULL, 0);
     if (had) sched_setaffinity(0, sizeof(before), &before);
     free((void*)mem);
