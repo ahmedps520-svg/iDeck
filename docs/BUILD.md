@@ -64,8 +64,9 @@ The sideload job rebuilds QEMU from UTM's source with `engine/qemu/*.patch`
 in place of the QEMU framework in UTM's sysroot. Everything else in the sysroot
 stays UTM's prebuilt binary.
 
-- The patch is developed against `utmapp/qemu` tag `v10.0.12-utm` with UTM's
-  `patches/qemu-10.0.12-utm.patch` applied.
+- The patches (`0001-host-vfp`, `0002-asid-keep-global`) apply in order to
+  `utmapp/qemu` tag `v10.0.12-utm` with UTM's `patches/qemu-10.0.12-utm.patch`
+  applied.
 - `engine/hostvfp_spec.py --table … --cases bench/fpcheck_cases.h` regenerates
   the pattern table inside the patch and the test encodings; a unit test fails
   when they are out of date.

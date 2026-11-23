@@ -34,6 +34,10 @@ on:
         description: Boot test only - iDeck's QEMU with native floating point and kept kernel TLB entries (the app's defaults from build 37); off = Ubuntu's QEMU
         type: boolean
         default: true
+      engine_options:
+        description: Boot test only - with iDeck's QEMU, switch its options on (off = the same QEMU with stock behaviour, as a control)
+        type: boolean
+        default: true
       boot_test:
         description: Run the boot test (adds ~1-3 hours)
         type: boolean
@@ -136,7 +140,11 @@ jobs:
           EXTRA="--steam-observe 300 --tb-cache-mb ${{ inputs.tb_cache_mb || '1024' }} --steam-zink-check"
           EXTRA="$EXTRA --cpu-model ${{ inputs.cpu_model || 'max' }}"
           if [ -n "${{ steps.qemu.outputs.qemu }}" ]; then
-            EXTRA="$EXTRA --qemu ${{ steps.qemu.outputs.qemu }} --host-vfp --tlb-keep-global"
+            EXTRA="$EXTRA --qemu ${{ steps.qemu.outputs.qemu }}"
+            # A push (tag) has no inputs: options on.
+            if [ "${{ inputs.engine_options }}" != "false" ]; then
+              EXTRA="$EXTRA --host-vfp --tlb-keep-global"
+            fi
           fi
           if [ "${{ inputs.steam_software_ui }}" = "true" ]; then
             EXTRA="$EXTRA --steam-software-ui"

@@ -550,10 +550,25 @@ def main() -> int:
                 if window_at:
                     agent.wait_event("__none__", 20)
                     res["png_bytes"] = screenshot(f"screen-ab-{label}")  # kept for a look
+                    # The window must still be there: a web helper that
+                    # crashes after its first frame leaves a blank screen.
+                    res["still_drawn"] = res["png_bytes"] > 25000
+                    if not res["still_drawn"]:
+                        t_blank = time.time()
+                        while time.time() - t_blank < 120:
+                            agent.wait_event("__none__", 5)
+                            if screenshot(f"screen-ab-{label}-later") > 25000:
+                                res["redrawn_after_s"] = round(time.time() - t_blank, 1)
+                                break
                     res["top"] = top(f"ab-{label}")
                     res["cpu_60s"] = cpu_average(60)
             except Exception as e:  # noqa: BLE001
                 res["error"] = str(e)
+            try:
+                tail = agent.request("logs", {"unit": "ideck-steam.service", "lines": 400}, timeout=120)
+                (a.report / f"journal-steam-{label}.txt").write_text(tail.get("output", ""))
+            except Exception:  # noqa: BLE001
+                pass
             log(f"steam-ab-{label}", res, ok=res.get("window_s") is not None)
             return res
 
