@@ -312,7 +312,19 @@ def main() -> int:
         report["kpti"] = (ready or {}).get("kpti", "")
         log("status", agent.request("status"))
 
+        def fpcheck():
+            """Every FP instruction pattern in the guest against the hardware reference in the image."""
+            try:
+                r = agent.request("fpcheck.run", {"quick": False}, timeout=3600)
+            except Exception as e:  # an image without the check, or a failed run
+                log("fpcheck", str(e), ok=False)
+                return
+            (a.report / "fpcheck.json").write_text(json.dumps(r, indent=2))
+            report["fpcheck"] = r
+            log("fpcheck", r, ok=bool(r.get("match")) and bool(r.get("flags_match")))
+
         if a.bench_only:
+            fpcheck()
             bench = agent.request("bench.run", {"quick": False}, timeout=3600)
             (a.report / "bench.json").write_text(json.dumps(bench, indent=2))
             report["bench"] = {r["name"]: r.get("value") for r in bench.get("results", []) if r.get("ok")}
@@ -353,6 +365,7 @@ def main() -> int:
         log("steam-status", agent.request("steam.status"))
 
         if not a.skip_bench:
+            fpcheck()
             try:
                 bench = agent.request("bench.run", {"quick": False}, timeout=3600)
                 (a.report / "bench.json").write_text(json.dumps(bench, indent=2))

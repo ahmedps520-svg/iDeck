@@ -342,6 +342,24 @@ Reply execute_slow(const Job& job) {
         rep.result = parse_json_or_text(r.output);
         return rep;
     }
+    if (job.op == "fpcheck.run") {
+        // The floating-point instruction check (bench/fpcheck.c) against the
+        // digests recorded on real hardware when the image was built.
+        const bool quick = a["quick"].as_bool(true);
+        std::vector<std::string> argv = {lib("ideck-fpcheck")};
+        if (quick) argv.push_back("--quick");
+        agent::RunResult r = agent::run(argv, 30 * 60 * 1000, 1 << 20);
+        Json result, reference;
+        if (!Json::parse(r.output, result) || !result.is_object()) {
+            return fail("fpcheck failed: " + r.output.substr(0, 500));
+        }
+        Json::parse(agent::read_text(lib("fpcheck-reference.json"), 256 << 10), reference);
+        Json cmp = agent::fpcheck_compare(result, reference[quick ? "quick" : "full"]);
+        cmp.set("reference_cpu", reference["cpu"]);
+        cmp.set("quick", quick);
+        rep.result = std::move(cmp);
+        return rep;
+    }
     if (job.op == "selftest.run") {
         agent::RunResult r = agent::run({"python3", lib("self_test.py"), "--json"}, 10 * 60 * 1000, 1 << 20);
         rep.result = parse_json_or_text(r.output);

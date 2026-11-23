@@ -73,4 +73,11 @@ std::string status_value(const std::string& status, const std::string& key);
 // per command name. Blocks for the interval.
 ideck::Json top_processes(int interval_ms, size_t limit);
 
+// Compares an ideck-fpcheck result (bench/fpcheck.c) with one recorded on
+// real hardware. "match" is true when every instruction pattern and the
+// mixed sequences produced the same register values; exception flags are
+// reported separately ("flags_match"). Differing pattern names are listed,
+// at most `limit` of each kind.
+ideck::Json fpcheck_compare(const ideck::Json& result, const ideck::Json& reference, size_t limit = 24);
+
 }  // namespace agent

@@ -113,6 +113,38 @@ TEST("agent: Steam UI helpers") {
     CHECK(ui.request("away", 10).is_object());
 }
 
+TEST("agent: fpcheck comparison with the hardware reference") {
+    using ideck::Json;
+    Json ref, same, other, none;
+    CHECK(Json::parse(R"({"patterns": {"FADD_s": ["a1", "f1"], "FCMP": ["a2", "f2"]},
+        "mix_values": "m", "mix_flags": "g", "cpu": "Neoverse-N2"})", ref));
+    CHECK(Json::parse(R"({"patterns": {"FADD_s": ["a1", "f1"], "FCMP": ["a2", "f2"]},
+        "mix_values": "m", "mix_flags": "g", "sigill": [], "runs": 10, "seconds": 1.5})", same));
+    Json r = agent::fpcheck_compare(same, ref);
+    CHECK(r["match"].as_bool());
+    CHECK(r["flags_match"].as_bool());
+    CHECK_EQ(r["patterns"].as_int(), 2);
+    CHECK_EQ(r["reference_cpu"].as_string(), std::string("Neoverse-N2"));
+    // A different value digest fails the match; a flag digest only flags_match.
+    CHECK(Json::parse(R"({"patterns": {"FADD_s": ["XX", "f1"], "FCMP": ["a2", "YY"]},
+        "mix_values": "m", "mix_flags": "g", "sigill": []})", other));
+    r = agent::fpcheck_compare(other, ref);
+    CHECK(!r["match"].as_bool());
+    CHECK(!r["flags_match"].as_bool());
+    CHECK_EQ(r["values_differ"].as_int(), 1);
+    CHECK_EQ(r["values_differ_names"].at(0).as_string(), std::string("FADD_s"));
+    CHECK_EQ(r["flags_differ_names"].at(0).as_string(), std::string("FCMP"));
+    // A pattern that did not run, a SIGILL, or no reference: no match.
+    CHECK(Json::parse(R"({"patterns": {"FADD_s": ["a1", "f1"]}, "mix_values": "m", "mix_flags": "g"})", other));
+    CHECK(!agent::fpcheck_compare(other, ref)["match"].as_bool());
+    CHECK(Json::parse(R"({"patterns": {"FADD_s": ["a1", "f1"], "FCMP": ["a2", "f2"]},
+        "mix_values": "m", "mix_flags": "g", "sigill": ["FCMP"]})", other));
+    CHECK(!agent::fpcheck_compare(other, ref)["match"].as_bool());
+    r = agent::fpcheck_compare(same, none);
+    CHECK(!r["match"].as_bool());
+    CHECK(!r["reference"].as_bool());
+}
+
 #if defined(__linux__)
 #include <linux/input.h>
 TEST("agent: gamepad state maps to evdev events") {

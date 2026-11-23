@@ -383,4 +383,50 @@ Json top_processes(int interval_ms, size_t limit) {
     return r;
 }
 
+Json fpcheck_compare(const Json& result, const Json& reference, size_t limit) {
+    Json out = Json::object();
+    Json values = Json::array(), flags = Json::array(), missing = Json::array();
+    size_t compared = 0, nvalues = 0, nflags = 0, nmissing = 0;
+    const Json& have = result["patterns"];
+    const Json& want = reference["patterns"];
+    auto note = [limit](Json& list, size_t& n, const std::string& name) {
+        if (n++ < limit) list.push(name);
+    };
+    if (want.is_object()) {
+        for (const auto& kv : want.members()) {
+            const Json* mine = have.is_object() ? have.find(kv.first) : nullptr;
+            if (!mine || !mine->is_array() || mine->size() != 2 || kv.second.size() != 2) {
+                note(missing, nmissing, kv.first);
+                continue;
+            }
+            ++compared;
+            if (mine->at(0) != kv.second.at(0)) note(values, nvalues, kv.first);
+            if (mine->at(1) != kv.second.at(1)) note(flags, nflags, kv.first);
+        }
+    }
+    const bool has_ref = want.is_object() && want.size() > 0;
+    const bool mix_values = has_ref && result["mix_values"] == reference["mix_values"];
+    const bool mix_flags = has_ref && result["mix_flags"] == reference["mix_flags"];
+    const size_t sigill = result["sigill"].is_array() ? result["sigill"].size() : 0;
+    out.set("reference", has_ref);
+    out.set("patterns", static_cast<int64_t>(compared));
+    out.set("values_differ", static_cast<int64_t>(nvalues));
+    out.set("flags_differ", static_cast<int64_t>(nflags));
+    out.set("missing", static_cast<int64_t>(nmissing));
+    out.set("values_differ_names", std::move(values));
+    out.set("flags_differ_names", std::move(flags));
+    out.set("missing_names", std::move(missing));
+    out.set("mix_values_equal", mix_values);
+    out.set("mix_flags_equal", mix_flags);
+    out.set("sigill", static_cast<int64_t>(sigill));
+    out.set("match", has_ref && compared > 0 && nvalues == 0 && nmissing == 0 && mix_values && sigill == 0);
+    out.set("flags_match", has_ref && nflags == 0 && mix_flags);
+    out.set("runs", result["runs"]);
+    out.set("mix_runs", result["mix_runs"]);
+    out.set("seconds", result["seconds"]);
+    out.set("mix_seconds", result["mix_seconds"]);
+    out.set("reference_cpu", reference["cpu"]);
+    return out;
+}
+
 }  // namespace agent

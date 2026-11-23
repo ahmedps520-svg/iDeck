@@ -18,6 +18,7 @@ on:
   push:
     paths:
       - "engine/**"
+      - ".github/actions/build-qemu/**"
       - "bench/fpcheck*"
       - "bench/ideck_bench.c"
       - ".github/workflows/engine.yml"
@@ -26,10 +27,6 @@ permissions:
   contents: read
 
 env:
-  QEMU_VERSION: 10.0.12-utm
-  QEMU_URL: https://github.com/utmapp/qemu/releases/download/v10.0.12-utm/qemu-10.0.12-utm.tar.xz
-  # UTM v5.0.8: the patch its own build applies on top of that tarball.
-  UTM_COMMIT: 535d6592a8bdc22b48de53703a371b80bf60d587
   # The published iDeck kernel the guests boot (Image.xz of runtime 0.1.12).
   KERNEL_URL: https://github.com/ahmedps520-svg/iDeck/releases/download/runtime-0.1.12/Image.xz
   KERNEL_SHA256: b92b6a411cd75724614a5a1081cdfe326c2b71abed606ab0138d3270810053c3
@@ -50,44 +47,11 @@ jobs:
         run: python -m unittest discover -s engine/tests -v
       - name: Test binaries (static aarch64-linux-musl)
         run: python tools/build_core.py bench --target aarch64-linux-musl
-      - name: Host packages
-        run: |
-          bash tools/ci_apt.sh ninja-build pkg-config libglib2.0-dev libpixman-1-dev libslirp-dev \
-            libfdt-dev zlib1g-dev libpng-dev python3-venv ccache busybox-static xz-utils flex bison
-      - name: Compiler cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: engine-ccache-${{ env.QEMU_VERSION }}-${{ hashFiles('engine/qemu/*.patch') }}
-          restore-keys: |
-            engine-ccache-${{ env.QEMU_VERSION }}-
-      - name: QEMU source with UTM's patch and the engine patches
-        run: |
-          mkdir -p build/engine
-          cd build/engine
-          curl -fL --retry 5 -o qemu.tar.xz "$QEMU_URL"
-          tar -xf qemu.tar.xz
-          curl -fL --retry 5 -o utm.patch \
-            "https://raw.githubusercontent.com/utmapp/UTM/$UTM_COMMIT/patches/qemu-$QEMU_VERSION.patch"
-          cd "qemu-$QEMU_VERSION"
-          patch -p1 < ../utm.patch
-          for p in "$GITHUB_WORKSPACE"/engine/qemu/*.patch; do
-            echo "== $p"
-            patch -p1 < "$p"
-          done
-      - name: Build qemu-system-aarch64
-        run: |
-          cd "build/engine/qemu-$QEMU_VERSION"
-          mkdir -p build
-          cd build
-          ../configure --target-list=aarch64-softmmu --cc="ccache gcc" \
-            --without-default-features --enable-system --disable-user --enable-tcg \
-            --enable-slirp --enable-fdt=system --enable-pixman --enable-png \
-            --disable-werror --disable-docs
-          ninja qemu-system-aarch64
-          ccache -s | head -12
-          ./qemu-system-aarch64 --version
-          ./qemu-system-aarch64 -cpu help | head -5
+      - name: Busybox for the test initramfs
+        run: bash tools/ci_apt.sh busybox-static
+      - name: QEMU with the engine patches
+        id: qemu
+        uses: ./.github/actions/build-qemu
       - name: Kernel
         run: |
           mkdir -p out
@@ -108,7 +72,7 @@ jobs:
       - name: Guest with QEMU's own floating point (x-host-vfp=off)
         run: |
           python engine/run_guest_tests.py \
-            --qemu "build/engine/qemu-$QEMU_VERSION/build/qemu-system-aarch64" \
+            --qemu "${{ steps.qemu.outputs.qemu }}" \
             --kernel out/Image --busybox /usr/bin/busybox \
             --bin build/core/ideck-fpcheck-aarch64-linux-musl:ideck-fpcheck \
             --bin build/core/ideck-bench-aarch64-linux-musl:ideck-bench \
@@ -117,7 +81,7 @@ jobs:
       - name: Guest with host VFP (x-host-vfp=on)
         run: |
           python engine/run_guest_tests.py \
-            --qemu "build/engine/qemu-$QEMU_VERSION/build/qemu-system-aarch64" \
+            --qemu "${{ steps.qemu.outputs.qemu }}" \
             --kernel out/Image --busybox /usr/bin/busybox \
             --bin build/core/ideck-fpcheck-aarch64-linux-musl:ideck-fpcheck \
             --bin build/core/ideck-bench-aarch64-linux-musl:ideck-bench \
@@ -148,4 +112,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: qemu-system-aarch64-linux-arm64
-          path: build/engine/qemu-${{ env.QEMU_VERSION }}/build/qemu-system-aarch64
+          path: ${{ steps.qemu.outputs.qemu }}

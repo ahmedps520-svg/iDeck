@@ -4,7 +4,8 @@
 # (GitHub's ubuntu-24.04-arm runners), so package scripts run natively.
 #
 #   sudo linux/build-image.sh --version 0.1.0 --agent build/core/ideck-agent-aarch64-linux-musl \
-#        --bench build/core/ideck-bench-aarch64-linux-musl --out out/
+#        --bench build/core/ideck-bench-aarch64-linux-musl \
+#        --fpcheck build/core/ideck-fpcheck-aarch64-linux-musl --out out/
 #
 # Outputs in --out: Image (raw arm64 kernel), initrd.img, system.img (sparse
 # ext4), packages.lock (exact package versions), guest-info.json.
@@ -13,6 +14,7 @@ set -euo pipefail
 VERSION=""
 AGENT=""
 BENCH=""
+FPCHECK=""
 OUT=""
 SUITE="trixie"
 MIRROR="http://deb.debian.org/debian"
@@ -25,14 +27,15 @@ while [ $# -gt 0 ]; do
         --version) VERSION="$2"; shift 2 ;;
         --agent) AGENT="$2"; shift 2 ;;
         --bench) BENCH="$2"; shift 2 ;;
+        --fpcheck) FPCHECK="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --snapshot) SNAPSHOT="$2"; shift 2 ;;
         --mirror) MIRROR="$2"; shift 2 ;;
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
-[ -n "$VERSION" ] && [ -f "$AGENT" ] && [ -f "$BENCH" ] && [ -n "$OUT" ] || {
-    echo "usage: $0 --version V --agent PATH --bench PATH --out DIR [--snapshot TS]" >&2; exit 2; }
+[ -n "$VERSION" ] && [ -f "$AGENT" ] && [ -f "$BENCH" ] && [ -f "$FPCHECK" ] && [ -n "$OUT" ] || {
+    echo "usage: $0 --version V --agent PATH --bench PATH --fpcheck PATH --out DIR [--snapshot TS]" >&2; exit 2; }
 [ "$(id -u)" = 0 ] || { echo "must run as root" >&2; exit 1; }
 [ "$(uname -m)" = aarch64 ] || { echo "must run on an arm64 host" >&2; exit 1; }
 
@@ -80,6 +83,10 @@ echo "==> installing iDeck files"
 cp -a "$HERE/guest/rootfs/." "$ROOT/"
 install -m 0755 "$AGENT" "$ROOT/usr/lib/ideck/ideck-agent"
 install -m 0755 "$BENCH" "$ROOT/usr/lib/ideck/ideck-bench"
+# The floating-point instruction check, with what this build host's CPU
+# (real hardware) computes for it; the agent's fpcheck.run compares.
+install -m 0755 "$FPCHECK" "$ROOT/usr/lib/ideck/ideck-fpcheck"
+python3 "$HERE/linux/fpcheck_reference.py" "$FPCHECK" "$ROOT/usr/lib/ideck/fpcheck-reference.json"
 chmod 0755 "$ROOT"/usr/lib/ideck/{ideck-steam-launch,ideck-steam-url,session,set-resolution,init-home,zram-swap,steam-path/taskset} \
            "$ROOT"/usr/lib/ideck/*.py
 echo "$VERSION" > "$ROOT/usr/lib/ideck/runtime-version"

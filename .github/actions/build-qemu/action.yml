@@ -1,0 +1,61 @@
+name: Build iDeck's QEMU for this Linux runner
+description: >
+  UTM's QEMU 10.0.12 with UTM's own patch and engine/qemu/*.patch on top,
+  aarch64-softmmu only, built for the runner's architecture. On an ARM64
+  runner this is the same TCG backend as on the iPad.
+
+outputs:
+  qemu:
+    description: Path of the qemu-system-aarch64 binary
+    value: ${{ steps.build.outputs.qemu }}
+
+runs:
+  using: composite
+  steps:
+    - name: Host packages for QEMU
+      shell: bash
+      run: |
+        bash tools/ci_apt.sh ninja-build pkg-config libglib2.0-dev libpixman-1-dev libslirp-dev \
+          libfdt-dev zlib1g-dev libpng-dev python3-venv ccache xz-utils flex bison
+    - name: Compiler cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: engine-ccache-10.0.12-utm-${{ runner.arch }}-${{ hashFiles('engine/qemu/*.patch') }}
+        restore-keys: |
+          engine-ccache-10.0.12-utm-${{ runner.arch }}-
+    - name: QEMU source with UTM's patch and the engine patches
+      shell: bash
+      env:
+        QEMU_VERSION: 10.0.12-utm
+        QEMU_URL: https://github.com/utmapp/qemu/releases/download/v10.0.12-utm/qemu-10.0.12-utm.tar.xz
+        # UTM v5.0.8: the patch its own build applies on top of that tarball.
+        UTM_COMMIT: 535d6592a8bdc22b48de53703a371b80bf60d587
+      run: |
+        mkdir -p build/engine
+        cd build/engine
+        curl -fL --retry 5 -o qemu.tar.xz "$QEMU_URL"
+        tar -xf qemu.tar.xz
+        curl -fL --retry 5 -o utm.patch \
+          "https://raw.githubusercontent.com/utmapp/UTM/$UTM_COMMIT/patches/qemu-$QEMU_VERSION.patch"
+        cd "qemu-$QEMU_VERSION"
+        patch -p1 < ../utm.patch
+        for p in "$GITHUB_WORKSPACE"/engine/qemu/*.patch; do
+          echo "== $p"
+          patch -p1 < "$p"
+        done
+    - name: Build qemu-system-aarch64
+      id: build
+      shell: bash
+      run: |
+        cd build/engine/qemu-10.0.12-utm
+        mkdir -p build
+        cd build
+        ../configure --target-list=aarch64-softmmu --cc="ccache gcc" \
+          --without-default-features --enable-system --disable-user --enable-tcg \
+          --enable-slirp --enable-fdt=system --enable-pixman --enable-png \
+          --disable-werror --disable-docs
+        ninja qemu-system-aarch64
+        ccache -s | head -12
+        ./qemu-system-aarch64 --version
+        echo "qemu=$PWD/qemu-system-aarch64" >> "$GITHUB_OUTPUT"
