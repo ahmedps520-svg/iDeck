@@ -42,6 +42,14 @@ struct SettingsView: View {
                     .onChange(of: model.settings.steamBeta) { _ in applySteam() }
                 Toggle("Software-rendered Steam UI (compatibility)", isOn: $model.settings.steamSoftwareUI)
                     .onChange(of: model.settings.steamSoftwareUI) { _ in applySteam() }
+                    .disabled(model.settings.steamGpuUI)
+                Toggle("GPU-drawn Steam UI (experimental, needs Vulkan)", isOn: $model.settings.steamGpuUI)
+                    .onChange(of: model.settings.steamGpuUI) { _ in applySteam() }
+                    .disabled(!model.settings.vulkan || model.settings.safeGraphics)
+                if model.settings.steamGpuUI {
+                    Text("Steam's window is drawn with OpenGL on Vulkan (Zink). If it stays black or grey, turn this off.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("Lightweight Steam (no Friends & Chat, no web sandbox)", isOn: $model.settings.steamLightweight)
                     .onChange(of: model.settings.steamLightweight) { _ in applySteam() }
                 Toggle("Compact library (Steam Small Mode)", isOn: $model.settings.steamSmallMode)

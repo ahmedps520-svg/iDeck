@@ -44,6 +44,12 @@ struct Settings: Codable, Equatable {
     /// window has been seen painting on a device (build 21); GPU mode left
     /// it black.
     var steamSoftwareUI = true
+    /// Experimental: Steam's UI drawn by the GPU through Mesa's Zink (OpenGL
+    /// on Vulkan, i.e. Venus and MoltenVK), as Valve's ARM64 client seems to
+    /// expect (its steamwebhelper.sh sets the Zink option
+    /// LIBGL_KOPPER_DISABLE). Software drawing costs the emulated CPU the most.
+    /// Needs Vulkan in Linux (build 31+). Overrides the software setting.
+    var steamGpuUI = false
     /// Skips Steam's Friends and Chat UI (-nofriendsui -nochatui): fewer
     /// web views for the emulated CPU to run. Needs runtime 0.1.6.
     var steamLightweight = true

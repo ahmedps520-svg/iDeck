@@ -21,6 +21,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (class, nonatomic, readonly) uint64_t physFootprint;
 /// "virtual 9.8 GiB, range 61.0 GiB (0x...-0x...)" from TASK_VM_INFO.
 @property (class, nonatomic, readonly) NSString *addressSpaceSummary;
+/// QEMU's vCPU threads ("CPU n/TCG"): their scheduling priority, and raises
+/// any below user-interactive with a QoS override, so iOS prefers the
+/// performance cores for them. Returns a line for the log.
++ (NSString *)raiseVCPUThreadQoS;
 @property (class, nonatomic, readonly) uint64_t physicalMemory;
 /// e.g. "iPad17,1"
 @property (class, nonatomic, readonly) NSString *modelIdentifier;

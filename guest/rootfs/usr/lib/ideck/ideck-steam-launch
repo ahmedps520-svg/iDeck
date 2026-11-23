@@ -21,10 +21,14 @@ IDECK_STEAM_LIGHT=1
 IDECK_STEAM_SMALL=0
 IDECK_STEAM_PIN=0
 IDECK_STEAM_CEF_LEAN=0
+IDECK_STEAM_WEBHELPER_GL=
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
     . /var/lib/ideck/steam.env
 fi
+# Read by steam-path/taskset when it starts steamwebhelper ("zink": the web
+# helper's OpenGL runs on Vulkan through Mesa's Zink; experimental).
+export IDECK_STEAM_WEBHELPER_GL
 
 # Steam's steamwebhelper.sh pins Steam's UI to CPUs 2-6 (taskset 0x7c), the
 # big cores of Valve's Steam Frame: 2 of 4 vCPUs here. The taskset in

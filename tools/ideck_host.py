@@ -255,6 +255,8 @@ def main() -> int:
                     help="restart Steam with and without Steam's CPU pinning of steamwebhelper and time its window")
     ap.add_argument("--steam-lean-ab", action="store_true",
                     help="restart Steam without and with the lean Chromium options (cef_lean) and compare")
+    ap.add_argument("--steam-zink-check", action="store_true",
+                    help="restart Steam with its UI on the GPU through Zink and check that the window draws")
     a = ap.parse_args()
     if a.bench_only:
         a.cmdline_add.append("ideck.noprovision")
@@ -528,6 +530,11 @@ def main() -> int:
                 "lean": restart_timing("lean", {"cef_lean": True}),
             }
             jit("after-lean-ab")
+        if a.steam_zink_check and window_seen_at is not None:
+            # GPU-drawn Steam UI through Zink. CI's Vulkan is lavapipe (CPU),
+            # so this checks that the window draws, not how fast.
+            report["zink_check"] = restart_timing("zink", {"cef_software": False, "webhelper_zink": True})
+            restart_timing("back-to-default", {"webhelper_zink": False})
 
         # A Steam restart (the next iDeck launch) must not install the
         # client again: with the bootstrap's package/*.manifest the updater

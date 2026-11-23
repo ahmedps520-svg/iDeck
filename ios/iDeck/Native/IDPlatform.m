@@ -8,6 +8,8 @@
 #import <fcntl.h>
 #import <mach/mach.h>
 #import <os/proc.h>
+#import <pthread.h>
+#import <pthread/qos.h>
 #import <stdlib.h>
 #import <string.h>
 #import <sys/mman.h>
@@ -69,6 +71,41 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
                                      (unsigned long long)info.min_address, (unsigned long long)info.max_address]
         : @"range unknown";
     return [NSString stringWithFormat:@"virtual %.1f GiB, %@", info.virtual_size / gib, range];
+}
+
++ (NSString *)raiseVCPUThreadQoS {
+    // QEMU starts on a user-interactive thread (IDQemuLauncher) and creates
+    // its vCPU threads with plain pthread attributes. Whether those inherit
+    // the QoS is not documented; a thread below user-interactive would be
+    // scheduled on the efficiency cores. Base priority 47 is user-interactive,
+    // 37 user-initiated, 31 default, 20 utility.
+    thread_act_array_t threads = NULL;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) return @"vCPU threads: unavailable";
+    NSMutableArray<NSString *> *found = [NSMutableArray array];
+    int raised = 0, failed = 0;
+    for (mach_msg_type_number_t i = 0; i < count; i++) {
+        thread_extended_info_data_t info;
+        mach_msg_type_number_t n = THREAD_EXTENDED_INFO_COUNT;
+        if (thread_info(threads[i], THREAD_EXTENDED_INFO, (thread_info_t)&info, &n) == KERN_SUCCESS) {
+            info.pth_name[sizeof(info.pth_name) - 1] = 0;
+            NSString *name = [NSString stringWithUTF8String:info.pth_name] ?: @"";
+            if ([name hasSuffix:@"/TCG"]) {
+                [found addObject:[NSString stringWithFormat:@"%@ %d", name, info.pth_priority]];
+                if (info.pth_priority < 47) {
+                    pthread_t pt = pthread_from_mach_thread_np(threads[i]);
+                    if (pt && pthread_override_qos_class_start_np(pt, QOS_CLASS_USER_INTERACTIVE, 0)) raised++;
+                    else failed++;
+                }
+            }
+        }
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)threads, count * sizeof(thread_act_t));
+    if (found.count == 0) return @"vCPU threads: none named */TCG found";
+    return [NSString stringWithFormat:@"vCPU threads (base priority): %@; raised to user-interactive: %d%@",
+                                      [found componentsJoinedByString:@", "], raised,
+                                      failed ? [NSString stringWithFormat:@", failed: %d", failed] : @""];
 }
 
 + (uint64_t)physicalMemory {

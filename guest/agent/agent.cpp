@@ -250,6 +250,8 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
         // Fewer Chromium processes and less drawing work (ideck-steam-launch).
         env += std::string("IDECK_STEAM_CEF_LEAN=") + (a["cef_lean"].as_bool(false) ? "1" : "0") + "\n";
+        // Experimental: steamwebhelper's OpenGL through Zink (Vulkan/Venus).
+        env += std::string("IDECK_STEAM_WEBHELPER_GL=") + (a["webhelper_zink"].as_bool(false) ? "zink" : "") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
         // disk survives runtime updates (system disk replacement).
         const std::string paths[] = {std::string(kStateDir) + "/steam.env", "/home/.ideck/steam.env"};

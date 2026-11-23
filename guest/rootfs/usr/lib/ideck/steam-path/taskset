@@ -7,8 +7,16 @@
 # all with 2 vCPUs (taskset then fails and the UI never starts). The web
 # helper is therefore started without a CPU mask; any other call goes to
 # util-linux taskset unchanged.
+#
+# IDECK_STEAM_WEBHELPER_GL=zink (Settings > GPU-drawn Steam UI, experimental):
+# the web helper's OpenGL goes through Mesa's Zink on Vulkan (Venus), so
+# Chromium draws on the GPU instead of the emulated CPU. Only the web helper
+# gets it; games started by Steam keep their own drivers.
 if [ "$#" -ge 2 ] && [ "${2##*/}" = steamwebhelper ]; then
     shift
+    if [ "${IDECK_STEAM_WEBHELPER_GL:-}" = zink ]; then
+        export MESA_LOADER_DRIVER_OVERRIDE=zink
+    fi
     exec "$@"
 fi
 exec /usr/bin/taskset "$@"

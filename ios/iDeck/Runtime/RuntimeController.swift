@@ -602,6 +602,7 @@ final class RuntimeController: ObservableObject {
             DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")"
                           + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
             DiagLog.write("address space with Linux running: \(IDPlatform.addressSpaceSummary)")
+            DiagLog.write(IDPlatform.raiseVCPUThreadQoS())
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running
@@ -753,11 +754,15 @@ final class RuntimeController: ObservableObject {
     func applySteamSettings() async {
         guard let agent else { return }
         let s = settings
+        // GPU drawing needs Venus in Linux; otherwise Steam stays on software.
+        let gpuUI = s.steamGpuUI && s.vulkan && !s.safeGraphics
+        let software = s.steamSoftwareUI && !gpuUI
         let options: [String: Any] = ["bigpicture": s.steamBigPicture, "beta": s.steamBeta,
-                                      "cef_software": s.steamSoftwareUI, "overlay": s.showPerformanceOverlay,
+                                      "cef_software": software, "webhelper_zink": gpuUI,
+                                      "overlay": s.showPerformanceOverlay,
                                       "lightweight": s.steamLightweight, "small_mode": s.steamSmallMode]
-        let signature = "bigpicture=\(s.steamBigPicture) beta=\(s.steamBeta) cef_software=\(s.steamSoftwareUI)"
-            + " lightweight=\(s.steamLightweight) small_mode=\(s.steamSmallMode)"
+        let signature = "bigpicture=\(s.steamBigPicture) beta=\(s.steamBeta) cef_software=\(software)"
+            + " gpu_ui=\(gpuUI) lightweight=\(s.steamLightweight) small_mode=\(s.steamSmallMode)"
         guard (try? await agent.request("steam.configure", options)) != nil else { return }
         let applied = UserDefaults.standard.string(forKey: RuntimeController.appliedSteamOptionsKey)
         guard applied != signature else { return }
