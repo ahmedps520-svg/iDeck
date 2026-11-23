@@ -31,7 +31,7 @@ on:
         description: Boot test only - QEMU CPU model (max is the app's default from build 33)
         default: max
       host_vfp:
-        description: Boot test only - iDeck's QEMU with native floating point (the app's default from build 36); off = Ubuntu's QEMU
+        description: Boot test only - iDeck's QEMU with native floating point and kept kernel TLB entries (the app's defaults from build 37); off = Ubuntu's QEMU
         type: boolean
         default: true
       boot_test:
@@ -105,6 +105,7 @@ jobs:
           if [ -n "$Q" ]; then
             variant engine-helpers --cpu-model max --qemu "$Q"
             variant engine-native-fp --cpu-model max --qemu "$Q" --host-vfp
+            variant engine-native-fp-tlb --cpu-model max --qemu "$Q" --host-vfp --tlb-keep-global
           fi
           python3 - <<'PY'
           import json, pathlib
@@ -135,7 +136,7 @@ jobs:
           EXTRA="--steam-observe 300 --tb-cache-mb ${{ inputs.tb_cache_mb || '1024' }} --steam-zink-check"
           EXTRA="$EXTRA --cpu-model ${{ inputs.cpu_model || 'max' }}"
           if [ -n "${{ steps.qemu.outputs.qemu }}" ]; then
-            EXTRA="$EXTRA --qemu ${{ steps.qemu.outputs.qemu }} --host-vfp"
+            EXTRA="$EXTRA --qemu ${{ steps.qemu.outputs.qemu }} --host-vfp --tlb-keep-global"
           fi
           if [ "${{ inputs.steam_software_ui }}" = "true" ]; then
             EXTRA="$EXTRA --steam-software-ui"

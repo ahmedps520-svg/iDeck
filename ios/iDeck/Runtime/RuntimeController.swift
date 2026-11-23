@@ -472,26 +472,29 @@ final class RuntimeController: ObservableObject {
         if s.safeGraphics { DiagLog.write("safe graphics: GPU acceleration off (virtio-gpu 2D)") }
         cfg.audio = s.audio ? "hda" : "none"
         cfg.splitWx = RuntimeController.edition == "jit"
-        // Native floating point needs iDeck's patched QEMU, which only the
-        // JIT edition embeds (the interpreter edition uses UTM's build).
-        let nativeFP = EngineGuard.decide(settingOn: s.nativeFloatingPoint,
-                                          supported: RuntimeController.edition == "jit",
-                                          unfinishedStarts: EngineGuard.unfinishedStarts(Paths.nativeFPMarker))
-        if nativeFP.switchSettingOff {
+        // The engine options need iDeck's patched QEMU, which only the JIT
+        // edition embeds (the interpreter edition uses UTM's build).
+        let engine = EngineGuard.decide(anySettingOn: s.nativeFloatingPoint || s.fastProcessSwitch,
+                                        supported: RuntimeController.edition == "jit",
+                                        unfinishedStarts: EngineGuard.unfinishedStarts(Paths.nativeFPMarker))
+        if engine.switchSettingsOff {
             var changed = Settings.load()
             changed.nativeFloatingPoint = false
+            changed.fastProcessSwitch = false
             changed.save()
             NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
             EngineGuard.clear(Paths.nativeFPMarker)
-            warnings.append("Native floating point was switched off: Linux did not finish starting with it "
-                            + "the last \(EngineGuard.maxUnfinishedStarts) times. You can switch it back on in Settings \u{203A} Advanced.")
-            DiagLog.write("engine: native floating point switched off after \(EngineGuard.maxUnfinishedStarts) unfinished starts")
+            warnings.append("Native floating point and Fast process switching were switched off: Linux did not finish "
+                            + "starting with them the last \(EngineGuard.maxUnfinishedStarts) times. You can switch them back on in Settings \u{203A} Advanced.")
+            DiagLog.write("engine: options switched off after \(EngineGuard.maxUnfinishedStarts) unfinished starts")
         }
-        cfg.hostVfp = nativeFP.useNativeFP
-        nativeFPInUse = nativeFP.useNativeFP
+        cfg.hostVfp = engine.useEngine && s.nativeFloatingPoint
+        cfg.tlbKeepGlobal = engine.useEngine && s.fastProcessSwitch
+        nativeFPInUse = cfg.hostVfp
         bootRuntimeVersion = files.version
-        if nativeFP.useNativeFP { EngineGuard.noteStart(Paths.nativeFPMarker) }
-        DiagLog.write("engine: native floating point \(nativeFP.useNativeFP ? "on (x-host-vfp)" : "off")")
+        if cfg.hostVfp || cfg.tlbKeepGlobal { EngineGuard.noteStart(Paths.nativeFPMarker) }
+        DiagLog.write("engine: native floating point \(cfg.hostVfp ? "on (x-host-vfp)" : "off"), "
+                      + "kernel translations kept across process switches \(cfg.tlbKeepGlobal ? "on (x-asid-keep-global)" : "off")")
         if s.ramInFile {
             // Guest RAM as a shared file mapping: iPadOS can write those pages
             // back to disk and drop them, and they are not charged to the app's

@@ -37,6 +37,10 @@ struct VmConfig {
     // Only a QEMU built with engine/qemu/*.patch has the property; any
     // other QEMU refuses to start with it.
     bool host_vfp = false;
+    // Keep the guest kernel's (global) TLB entries when a process switch
+    // changes the ASID, instead of emptying QEMU's soft TLB
+    // ("x-asid-keep-global=on", engine/qemu/0002). Same caveat as host_vfp.
+    bool tlb_keep_global = false;
     bool multithread_tcg = true;
     // JIT obtained through a debugger on TXM devices maps code through a
     // RW/RX mirror (QEMU split-wx). Required unless the app holds the

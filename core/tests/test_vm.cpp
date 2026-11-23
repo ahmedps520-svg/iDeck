@@ -132,7 +132,12 @@ TEST("qemu: file-backed RAM and comma escaping") {
         CHECK(vm_config_from_json(vm_config_to_json(c), back, nullptr));
         CHECK(back.host_vfp);
     }
+    c.tlb_keep_global = true;
+    CHECK(has_pair(build_qemu_args(c).argv, "-cpu",
+                   "max,pauth=off,sve=off,sme=off,x-host-vfp=on,x-asid-keep-global=on"));
     c.host_vfp = false;
+    CHECK(has_pair(build_qemu_args(c).argv, "-cpu", "max,pauth=off,sve=off,sme=off,x-asid-keep-global=on"));
+    c.tlb_keep_global = false;
     c.cpu_model = "neoverse-n1";
     std::string cmdline = default_kernel_cmdline();
     CHECK(cmdline.find(" kpti=0") != std::string::npos);

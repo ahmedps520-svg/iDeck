@@ -44,6 +44,11 @@ struct Settings: Codable, Equatable {
     /// RuntimeController turns it off by itself if Linux did not come up
     /// with it.
     var nativeFloatingPoint = true
+    /// QEMU keeps Linux's kernel address translations when Linux switches
+    /// between programs, instead of emptying its translation cache each
+    /// time (iDeck's engine patch 0002). CI: a switch cost about half.
+    /// Same guard as nativeFloatingPoint.
+    var fastProcessSwitch = true
     /// Settings written before version 2 had neoverse-n1 as the default CPU
     /// model; load() moves those to the new default once.
     var settingsVersion = 2

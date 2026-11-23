@@ -106,6 +106,9 @@ struct SettingsView: View {
                     }
                     Text("On by default. Linux's floating-point and vector math runs directly on this device's processor instead of being emulated in software, which speeds up games and Steam. Turn off if Linux or a game misbehaves; iDeck turns it off by itself if Linux fails to start twice in a row.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
+                    Toggle("Fast process switching", isOn: $model.settings.fastProcessSwitch)
+                    Text("On by default. When Linux switches from one program to another, iDeck keeps the address translations of Linux's own kernel instead of rebuilding all of them each time. Steam's interface is several programs that hand work to each other constantly. Turn off if Linux misbehaves.")
+                        .font(.caption).foregroundStyle(Theme.textTertiary)
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
                     Text("On by default. Keeps Linux's RAM in a file so \(Device.os) can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)

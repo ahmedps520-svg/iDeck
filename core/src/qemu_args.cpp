@@ -114,6 +114,7 @@ QemuArgsResult build_qemu_args(const VmConfig& c) {
         cpu += ",pauth=off,sve=off";
     }
     if (c.host_vfp) cpu += ",x-host-vfp=on";
+    if (c.tlb_keep_global) cpu += ",x-asid-keep-global=on";
     add({"-cpu", cpu});
     add({"-smp", "cpus=" + std::to_string(c.cpus) + ",sockets=1,cores=" + std::to_string(c.cpus) +
                      ",threads=1"});
@@ -265,6 +266,7 @@ bool vm_config_from_json(const Json& j, VmConfig& c, std::string* err) {
     c.tb_cache_mb = static_cast<uint64_t>(j["tb_cache_mb"].as_int(static_cast<int64_t>(c.tb_cache_mb)));
     c.cpu_model = j["cpu_model"].string_or(c.cpu_model);
     c.host_vfp = j["host_vfp"].as_bool(c.host_vfp);
+    c.tlb_keep_global = j["tlb_keep_global"].as_bool(c.tlb_keep_global);
     c.multithread_tcg = j["multithread_tcg"].as_bool(c.multithread_tcg);
     c.split_wx = j["split_wx"].as_bool(c.split_wx);
     c.ram_file = j["ram_file"].string_or(c.ram_file);
@@ -302,6 +304,7 @@ Json vm_config_to_json(const VmConfig& c) {
     j.set("tb_cache_mb", c.tb_cache_mb);
     j.set("cpu_model", c.cpu_model);
     j.set("host_vfp", c.host_vfp);
+    j.set("tlb_keep_global", c.tlb_keep_global);
     j.set("multithread_tcg", c.multithread_tcg);
     j.set("split_wx", c.split_wx);
     j.set("ram_file", c.ram_file);

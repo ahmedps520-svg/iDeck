@@ -1,28 +1,31 @@
 import Foundation
 
-/// Native floating point (QEMU "x-host-vfp", iDeck's engine patch) is on by
-/// default, checked in CI on an ARM64 host but not on every iPad. If Linux
-/// was started with it twice in a row and never reached the guest agent, the
-/// next start runs without it and the setting is switched off.
+/// iDeck's engine options (QEMU "x-host-vfp" and "x-asid-keep-global", the
+/// patches in engine/qemu) are on by default, checked in CI on an ARM64 host
+/// but not on every iPad. If Linux was started with any of them twice in a
+/// row and never reached the guest agent, the next start runs without them
+/// and the settings are switched off.
 enum EngineGuard {
     /// Consecutive unfinished starts after which the setting is switched off.
     /// One is not enough: closing iDeck while Linux boots also leaves one.
     static let maxUnfinishedStarts = 2
 
     struct Decision: Equatable {
-        var useNativeFP: Bool
-        /// The earlier starts with native floating point never came up.
-        var switchSettingOff: Bool
+        /// The engine options that are switched on may be used.
+        var useEngine: Bool
+        /// The earlier starts with engine options never came up.
+        var switchSettingsOff: Bool
     }
 
-    /// `unfinishedStarts`: starts with native floating point since the last
-    /// one that reached the guest agent.
-    static func decide(settingOn: Bool, supported: Bool, unfinishedStarts: Int) -> Decision {
-        guard settingOn, supported else { return Decision(useNativeFP: false, switchSettingOff: false) }
+    /// `anySettingOn`: at least one engine option is switched on.
+    /// `unfinishedStarts`: starts with engine options since the last one
+    /// that reached the guest agent.
+    static func decide(anySettingOn: Bool, supported: Bool, unfinishedStarts: Int) -> Decision {
+        guard anySettingOn, supported else { return Decision(useEngine: false, switchSettingsOff: false) }
         if unfinishedStarts >= maxUnfinishedStarts {
-            return Decision(useNativeFP: false, switchSettingOff: true)
+            return Decision(useEngine: false, switchSettingsOff: true)
         }
-        return Decision(useNativeFP: true, switchSettingOff: false)
+        return Decision(useEngine: true, switchSettingsOff: false)
     }
 
     static func unfinishedStarts(_ marker: URL) -> Int {
@@ -30,7 +33,7 @@ enum EngineGuard {
         return max(0, Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0)
     }
 
-    /// Linux is about to start with native floating point.
+    /// Linux is about to start with engine options.
     static func noteStart(_ marker: URL) {
         try? String(unfinishedStarts(marker) + 1).write(to: marker, atomically: true, encoding: .utf8)
     }
