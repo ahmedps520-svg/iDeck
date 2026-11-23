@@ -598,6 +598,7 @@ final class RuntimeController: ObservableObject {
             DiagLog.write("audio session setup failed: \(error.localizedDescription)")
         }
         let spice = IDSpiceClient(socketPath: Paths.spiceSocket.path)
+        spice.framesPerSecond = settings.refreshHz
         spice.audioEnabled = settings.audio
         spiceEvents.onChange = { [weak self] connected in
             Task { @MainActor in self?.displayConnected = connected }
@@ -782,6 +783,14 @@ final class RuntimeController: ObservableObject {
         await sendSteamScreen(reason: "Linux ready")
         if let st = try? await agent.requestDict("steam.status"), (st["service"] as? String) != "active" {
             _ = try? await agent.request("steam.start", timeout: 60)
+        }
+        // Linux's display runs at 60 Hz unless another rate is chosen
+        // (runtime 0.1.13+; older agents ignore the rate).
+        let s = settings
+        if s.refreshHz != 60 {
+            let size = s.resolution.size
+            await setGuestResolution(width: size.width, height: size.height, refresh: s.refreshHz)
+            DiagLog.write("display: \(size.width)x\(size.height) at \(s.refreshHz) Hz requested")
         }
         Task { await runEngineCheckOnce() }
     }
@@ -1023,8 +1032,8 @@ final class RuntimeController: ObservableObject {
         return try await agent.requestDict("bench.run", ["quick": quick], timeout: 1800)
     }
 
-    func setGuestResolution(width: Int, height: Int) async {
-        _ = try? await agent?.request("display.set", ["width": width, "height": height])
+    func setGuestResolution(width: Int, height: Int, refresh: Int = 60) async {
+        _ = try? await agent?.request("display.set", ["width": width, "height": height, "refresh": refresh])
     }
 }
 

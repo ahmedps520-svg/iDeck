@@ -15,8 +15,11 @@ struct SettingsView: View {
                 Picker("Refresh rate", selection: $model.settings.refreshHz) {
                     Text("30 Hz").tag(30)
                     Text("60 Hz").tag(60)
+                    if UIScreen.main.maximumFramesPerSecond >= 120 {
+                        Text("120 Hz").tag(120)
+                    }
                 }
-                Text("720p is the target for emulated games; higher resolutions cost GPU time and memory.")
+                Text("720p is the target for emulated games; higher resolutions cost GPU time and memory. The refresh rate is the most frames per second Linux draws and iDeck shows: 120 Hz lets light games go past 60, and makes everything else work harder for it. Applies the next time Linux starts.")
                     .font(.caption).foregroundStyle(Theme.textTertiary)
             }
             Section("Performance") {

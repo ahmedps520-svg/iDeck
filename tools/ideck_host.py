@@ -364,6 +364,15 @@ def main() -> int:
                 log("steam-software-ui", str(e), ok=False)
         log("steam-status", agent.request("steam.status"))
 
+        # The refresh-rate setting: X accepts a 120 Hz mode on virtio-gpu.
+        for hz in (120, 60):
+            try:
+                r = agent.request("display.set", {"width": 1280, "height": 720, "refresh": hz}, timeout=60)
+                out = (r or {}).get("output", "") if isinstance(r, dict) else str(r)
+                log(f"display-{hz}hz", out.strip()[-300:], ok=f"{hz}." in out or f"{hz - 1}." in out)
+            except Exception as e:  # noqa: BLE001
+                log(f"display-{hz}hz", str(e), ok=False)
+
         if not a.skip_bench:
             fpcheck()
             try:

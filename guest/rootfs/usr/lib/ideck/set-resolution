@@ -1,20 +1,28 @@
 #!/bin/bash
-# set-resolution WIDTH HEIGHT — changes the guest display mode (run as root
-# by the agent). Adds a CVT mode if the virtio-gpu output lacks it.
+# set-resolution WIDTH HEIGHT [HZ] — changes the guest display mode (run as
+# root by the agent). Adds a CVT mode if the virtio-gpu output lacks it.
+# HZ (default 60) is the refresh rate X paces its clients at; virtio-gpu has
+# no real vertical blank, so any rate works. Prints the output, the mode and
+# xrandr's line for the active mode.
 set -euo pipefail
 W="${1:?width}"
 H="${2:?height}"
+HZ="${3:-60}"
 [[ "$W" =~ ^[0-9]+$ && "$H" =~ ^[0-9]+$ ]] || { echo "bad size" >&2; exit 2; }
+[[ "$HZ" =~ ^[0-9]+$ ]] && [ "$HZ" -ge 24 ] && [ "$HZ" -le 240 ] || { echo "bad refresh rate" >&2; exit 2; }
 
 run_x() { runuser -u deck -- env DISPLAY=:0 "$@"; }
 
 OUT=$(run_x xrandr --query | awk '/ connected/{print $1; exit}')
 [ -n "$OUT" ] || { echo "no connected output" >&2; exit 1; }
 MODE="${W}x${H}"
+# The 60 Hz mode keeps its plain name; other rates get their own mode.
+[ "$HZ" = 60 ] || MODE="${W}x${H}_${HZ}"
 if ! run_x xrandr --query | grep -qE "^\s+${MODE}\s"; then
-    MODELINE=$(cvt "$W" "$H" 60 | sed -n 's/^Modeline "[^"]*" //p')
+    MODELINE=$(cvt "$W" "$H" "$HZ" | sed -n 's/^Modeline "[^"]*" //p')
     run_x xrandr --newmode "$MODE" $MODELINE 2>/dev/null || true
     run_x xrandr --addmode "$OUT" "$MODE"
 fi
 run_x xrandr --output "$OUT" --mode "$MODE"
 echo "$OUT $MODE"
+run_x xrandr --query | grep -m1 -F '*' || true

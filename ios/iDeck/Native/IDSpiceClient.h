@@ -37,6 +37,9 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 - (BOOL)connect;
 - (void)disconnect;
 
+/// Frames per second the view presents at (30, 60 or 120; default 60).
+/// Linux paces its own drawing at the same rate (agent display.set).
+@property (nonatomic) NSInteger framesPerSecond;
 - (void)attachToView:(MTKView *)view NS_SWIFT_NAME(attach(to:));
 - (void)detachFromView;
 /// Detaches only if `view` is the one currently attached. A view controller

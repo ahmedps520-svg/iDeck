@@ -330,7 +330,11 @@ Reply execute_slow(const Job& job) {
         int w = static_cast<int>(a["width"].as_int(0));
         int h = static_cast<int>(a["height"].as_int(0));
         if (w < 640 || h < 360 || w > 3840 || h > 2160) return fail("resolution out of range");
-        rep.result = run_to_json({lib("set-resolution"), std::to_string(w), std::to_string(h)}, 20000);
+        int hz = static_cast<int>(a["refresh"].as_int(60));
+        if (hz < 24 || hz > 240) return fail("refresh rate out of range");
+        rep.result = run_to_json({lib("set-resolution"), std::to_string(w), std::to_string(h),
+                                  std::to_string(hz)},
+                                 20000);
         if (rep.result["exit_code"].as_int() != 0) return fail("set-resolution failed");
         return rep;
     }

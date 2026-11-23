@@ -62,15 +62,21 @@
     view.device = view.device ?: MTLCreateSystemDefaultDevice();
     view.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     view.clearColor = MTLClearColorMake(0.04, 0.04, 0.05, 1.0);
-    // Linux renders at most 60 frames a second; presenting at 120 Hz only
-    // doubled the host GPU work (and heat, on an iPhone).
-    view.preferredFramesPerSecond = 60;
+    // Linux paces its drawing at the same rate (Settings > Refresh rate).
+    // 60 by default: presenting faster than Linux draws only adds host GPU
+    // work (and heat, on an iPhone).
+    view.preferredFramesPerSecond = self.framesPerSecond > 0 ? self.framesPerSecond : 60;
     self.renderer = [[CSMetalRenderer alloc] initWithMetalKitView:view];
     [self.renderer changeUpscaler:MTLSamplerMinMagFilterLinear downscaler:MTLSamplerMinMagFilterLinear];
     view.delegate = self.renderer;
     self.view = view;
     if (self.display) [self.display addRenderer:self.renderer];
     [self updateViewport];
+}
+
+- (void)setFramesPerSecond:(NSInteger)framesPerSecond {
+    _framesPerSecond = framesPerSecond;
+    if (self.view && framesPerSecond > 0) self.view.preferredFramesPerSecond = framesPerSecond;
 }
 
 - (void)detachFromView:(MTKView *)view {
