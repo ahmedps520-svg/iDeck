@@ -25,10 +25,12 @@
 | Battery and drain rate | `UIDevice.batteryLevel` over time | Performance |
 | GPU utilisation | **not measurable**: iPadOS exposes no API, so iDeck shows none | — |
 | CPU micro-benchmarks | `ideck-bench` in the guest | Performance › CPU benchmark |
+| Floating-point instructions against hardware | `ideck-fpcheck` in the guest (agent `fpcheck.run`) | Settings › Advanced, `ideck.log` |
 
 ## Optimisations implemented
 
 - **Memory:** jetsam-aware guest sizing; a bounded TCG cache; balloon with free-page reporting; on pressure the guest drops caches, the balloon inflates, disks sync and UI caches are released. Journald runs in RAM; `vm.swappiness=0`.
+- **Native floating point** (build 36): the embedded QEMU carries iDeck's engine patch. Linux's floating-point and vector math instructions run on the iPad's CPU instead of in QEMU's software routines. In CI, floating-point loops ran 2.4–7.3× faster and all 189 instruction patterns gave the same bits as real hardware. See [CPU_ENGINE](CPU_ENGINE.md#native-floating-point-build-36).
 - **CPU:** MTTCG; the `neoverse-n1` model avoids PAuth/SVE emulation costs (V1, N2 and A710 start with `pauth=off,sve=off` since build 28); performance profiles set 2, 4 or 6 vCPUs; the agent's input path runs on its own thread.
 - **Kernel:** `mitigations=off nowatchdog kpti=0 transparent_hugepage=never`. `kpti=0` (build 28 / runtime 0.1.9) made system calls 7× faster in CI; see below.
 - **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9; in the guest agent from runtime 0.1.11, which halved its own overhead, see [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen)):
@@ -173,7 +175,9 @@ Tested: `-cef-disable-site-isolation -cef-force-opaque-backgrounds -cef-disable-
 The questions above can only be answered on the device. `ideck.log` now records:
 - `address space with Linux running:` (TASK_VM_INFO), which decides whether the TCG cache can go to 2 GiB.
 - `vCPU threads (base priority):` for each QEMU `CPU n/TCG` thread. A thread below user-interactive (47) gets a QoS override, so iOS prefers the performance cores; the line shows whether that was needed.
-- `disks after 3 min` / `after 10 min:` flush operations and their total time from QMP `query-blockstats`. Each flush is an F_FULLFSYNC of the image; if these add up to many seconds, `cache=unsafe` would be worth its risk.
+- `disks after 3 min` / `after 10 min:` flush operations and their total time from QMP `query-blockstats`.
+  - Correction (2026-11-23): an earlier version of this page said each flush is an `F_FULLFSYNC`. QEMU 10.0.12 calls `fdatasync()` or `fsync()` (`util/osdep.c`), which on Apple systems does not force the flash to flush. The counters will show whether flushes cost anything on the iPad; nothing suggests they do.
+- `engine: native floating point on (x-host-vfp)` and, about 90 s after Linux is ready, `engine: floating-point check, …` (build 36 with runtime 0.1.13).
 
 ## Device run, build 30 (iPad17,2, iPadOS 27.2, paid Apple ID, 2026-11-22)
 

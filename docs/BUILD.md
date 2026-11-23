@@ -57,6 +57,23 @@ The app reads its runtime from
 `https://github.com/<your repo>/releases/download/runtime-latest/manifest.json`,
 which is baked in at build time. It can be changed in Settings › Advanced.
 
+### QEMU with the engine patch
+
+The sideload job rebuilds QEMU from UTM's source with `engine/qemu/*.patch`
+(`ios/scripts/build_qemu.sh`, 10–20 minutes, cached by patch hash) and puts it
+in place of the QEMU framework in UTM's sysroot. Everything else in the sysroot
+stays UTM's prebuilt binary.
+
+- The patch is developed against `utmapp/qemu` tag `v10.0.12-utm` with UTM's
+  `patches/qemu-10.0.12-utm.patch` applied.
+- `engine/hostvfp_spec.py --table … --cases bench/fpcheck_cases.h` regenerates
+  the pattern table inside the patch and the test encodings; a unit test fails
+  when they are out of date.
+- `engine.yml` builds the same source for ARM64 Linux
+  (`.github/actions/build-qemu`) and compares it with the runner's CPU. Run it
+  before building the app from a changed patch. `runtime.yml` boot-tests the
+  whole image on that QEMU.
+
 ### TestFlight
 
 Choose edition `testflight` or `both`. Add these repository secrets: `ASC_KEY_ID`,

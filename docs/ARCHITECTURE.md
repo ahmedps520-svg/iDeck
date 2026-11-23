@@ -7,7 +7,7 @@ iPadOS, or (C) a hybrid of existing components plus custom integration. iDeck us
 
 | Layer | Choice | Why |
 |---|---|---|
-| CPU | QEMU 10.0.12 **utmapp fork**, TCG JIT, in-process | The only open-source engine that already runs Linux guests on iPadOS 26+/27 with debugger-assisted JIT (TXM). Hypervisor.framework is not available to iPad apps. Writing a new engine would not beat TCG soon. |
+| CPU | QEMU 10.0.12 **utmapp fork** with iDeck's engine patch (native floating point, [CPU_ENGINE](CPU_ENGINE.md)), TCG JIT, in-process | The only open-source engine that already runs Linux guests on iPadOS 26+/27 with debugger-assisted JIT (TXM). Hypervisor.framework is not available to iPad apps. Writing a new engine would not beat TCG soon. |
 | GPU | virtio-gpu-gl + **Venus** (Vulkan) and **virgl** (GL) → virglrenderer (utmapp fork, thread render server) → MoltenVK / ANGLE-Metal | Shipping on iOS in UTM 5.0. Guest Mesa has the Venus driver. |
 | Display, audio, pointer | SPICE via **CocoaSpice** | Zero-copy Metal presentation, SPICE playback audio, keyboard and mouse channels |
 | Guest | Debian 13 arm64, 4 KiB pages, Xorg + openbox | The Steam ARM64 client and FEX both require 4 KiB pages. Xorg uses GL (virgl), which works. Vulkan compositing does not. |

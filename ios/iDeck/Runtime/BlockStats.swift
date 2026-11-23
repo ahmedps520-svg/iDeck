@@ -1,9 +1,9 @@
 import Foundation
 
 /// QEMU's per-disk I/O counters (QMP query-blockstats), summarised for the
-/// log. Flushes matter most: each guest flush makes QEMU flush the image
-/// file, which on Apple systems is an F_FULLFSYNC to flash, while Steam's
-/// web cache and config writes flush often.
+/// log. Each guest flush makes QEMU call fdatasync()/fsync() on the image
+/// file (util/osdep.c; not F_FULLFSYNC), and Steam's web cache and config
+/// writes flush often, so the counters show whether that costs anything.
 enum BlockStats {
     struct Disk: Equatable {
         var name: String

@@ -1,14 +1,16 @@
 # Third-party components
 
-iDeck's own source code (this repository) is MIT licensed. Built artifacts
-include or download the components below under their own licenses. iDeck
-does not copy source code from them; it builds, links or downloads them.
+iDeck's own source code (this repository) is MIT licensed, with one exception:
+`engine/qemu/*.patch` modifies QEMU and is licensed GPL-2.0-or-later, like the
+QEMU files it changes. Built artifacts include or download the components
+below under their own licenses. Apart from that patch, iDeck does not copy
+source code from them; it builds, links or downloads them.
 
 ## Bundled in the iOS app (from UTM 5.0.8's dependency build, `ios/scripts/fetch_sysroot.sh`)
 
 | Component | License | Source |
 |---|---|---|
-| QEMU 10.0.12 (utmapp fork) | GPL-2.0 (some parts LGPL/BSD) | https://github.com/utmapp/qemu (tag v10.0.12-utm) |
+| QEMU 10.0.12 (utmapp fork), modified from build 36 | GPL-2.0 (some parts LGPL/BSD) | https://github.com/utmapp/qemu (tag v10.0.12-utm) + UTM's `patches/qemu-10.0.12-utm.patch` + this repository's `engine/qemu/*.patch` (the complete corresponding source; `ios/scripts/build_qemu.sh` builds it) |
 | virglrenderer (utmapp fork, Venus) | MIT | https://github.com/utmapp/virglrenderer |
 | MoltenVK (utmapp fork) | Apache-2.0 | https://github.com/utmapp/MoltenVK |
 | ANGLE (from utmapp/WebKit) | BSD-3-Clause | https://github.com/utmapp/WebKit |
