@@ -60,6 +60,53 @@ std::vector<std::string> xdotool_chain(const std::string& command, const std::ve
     return argv;
 }
 
+std::string chromium_process_type(const std::string& cmdline) {
+    size_t pos = 0;
+    while (pos < cmdline.size()) {
+        size_t end = cmdline.find('\0', pos);
+        if (end == std::string::npos) end = cmdline.size();
+        std::string arg = cmdline.substr(pos, end - pos);
+        if (arg.rfind("--type=", 0) == 0) return arg.substr(7);
+        pos = end + 1;
+    }
+    return "browser";
+}
+
+std::vector<std::string> graphics_libraries(const std::string& maps) {
+    static const char* names[] = {"libvulkan_virtio", "libvulkan_lvp", "libvulkan_radeon", "libgallium",
+                                  "libGLX_mesa",     "libEGL_mesa",   "libvulkan.so",     "libGLESv2",
+                                  "libEGL.so",       "swiftshader",   "libvk_swiftshader"};
+    std::vector<std::string> found;
+    for (const char* n : names) {
+        if (maps.find(n) != std::string::npos) found.push_back(n);
+    }
+    return found;
+}
+
+Json webhelper_report() {
+    Json list = Json::array();
+#if defined(__linux__)
+    DIR* d = opendir("/proc");
+    if (!d) return list;
+    while (dirent* e = readdir(d)) {
+        char* end = nullptr;
+        long pid = std::strtol(e->d_name, &end, 10);
+        if (!end || *end || pid <= 0) continue;
+        const std::string dir = "/proc/" + std::string(e->d_name);
+        if (trimmed(read_text(dir + "/comm", 64)) != "steamwebhelper") continue;
+        Json p = Json::object();
+        p.set("pid", static_cast<int>(pid));
+        p.set("type", chromium_process_type(read_text(dir + "/cmdline", 16384)));
+        Json libs = Json::array();
+        for (const auto& l : graphics_libraries(read_text(dir + "/maps", 4 << 20))) libs.push(l);
+        p.set("graphics", std::move(libs));
+        list.push(std::move(p));
+    }
+    closedir(d);
+#endif
+    return list;
+}
+
 SteamUi::~SteamUi() {
     {
         std::lock_guard<std::mutex> l(m_);

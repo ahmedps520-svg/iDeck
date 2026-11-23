@@ -20,7 +20,6 @@ IDECK_MANGOHUD=0
 IDECK_STEAM_LIGHT=1
 IDECK_STEAM_SMALL=0
 IDECK_STEAM_PIN=0
-IDECK_STEAM_CEF_LEAN=0
 IDECK_STEAM_WEBHELPER_GL=
 if [ -r /var/lib/ideck/steam.env ]; then
     # shellcheck disable=SC1091
@@ -63,11 +62,9 @@ args=(-noverifyfiles)
 # Chat window, and no Chromium sandbox (its zygote and namespace set-up are
 # extra processes; the whole VM is already isolated from iOS).
 [ "$IDECK_STEAM_LIGHT" = 1 ] && args+=(-nofriendsui -nochatui -no-cef-sandbox)
-# Lean Chromium (Steam's own -cef options): Steam's pages share renderer
-# processes instead of one per site, backgrounds are opaque (no alpha
-# blending of see-through layers in the software compositor), and Chromium
-# and JS logging are off.
-[ "$IDECK_STEAM_CEF_LEAN" = 1 ] && args+=(-cef-disable-site-isolation -cef-force-opaque-backgrounds -cef-disable-js-logging -cef-disable-logging)
+# Not used: -cef-disable-site-isolation -cef-force-opaque-backgrounds
+# -cef-disable-js-logging -cef-disable-logging made no difference in CI
+# (run 45183440240: sign-in window 60.5 s vs 60.6 s, 7 vs 8 processes).
 # Small Mode: a plain list of games instead of the library and store pages.
 [ "$IDECK_STEAM_SMALL" = 1 ] && args+=(steam://open/minigameslist)
 

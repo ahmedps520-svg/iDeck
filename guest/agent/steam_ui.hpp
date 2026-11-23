@@ -42,6 +42,14 @@ int webhelper_nice_for(const std::string& state, bool game_running);
 // The argv for one xdotool run that applies `command` to every id
 // (xdotool chains commands: "windowminimize 1 windowminimize 2").
 std::vector<std::string> xdotool_chain(const std::string& command, const std::vector<std::string>& ids);
+// Chromium's process role from a NUL-separated cmdline ("--type=gpu-process"
+// -> "gpu-process"; no --type means the browser process).
+std::string chromium_process_type(const std::string& cmdline);
+// Graphics libraries named in /proc/<pid>/maps text: Mesa's GL/gallium and
+// Vulkan drivers (a Vulkan ICD in the GPU process means Zink is in use).
+std::vector<std::string> graphics_libraries(const std::string& maps);
+// Every steamwebhelper process with its role and graphics libraries.
+ideck::Json webhelper_report();
 
 class SteamUi {
 public:

@@ -98,6 +98,16 @@ TEST("agent: Steam UI helpers") {
     CHECK_EQ(argv[3], std::string("windowminimize"));
     CHECK_EQ(argv[6], std::string("2"));
 
+    CHECK_EQ(chromium_process_type("/home/deck/.local/share/Steam/steamrtarm64/steamwebhelper\0--type=gpu-process\0--no-sandbox\0"s),
+             std::string("gpu-process"));
+    CHECK_EQ(chromium_process_type("steamwebhelper\0-lang=en_US\0"s), std::string("browser"));
+    auto libs = graphics_libraries(
+        "ffff8000-ffff9000 r-xp 00000000 fe:00 1 /usr/lib/aarch64-linux-gnu/libgallium-26.1.6-1~bpo13+1.so\n"
+        "ffff9000-ffffa000 r-xp 00000000 fe:00 2 /usr/lib/aarch64-linux-gnu/libvulkan_virtio.so\n");
+    CHECK_EQ(libs.size(), 2u);
+    CHECK_EQ(libs[0], std::string("libvulkan_virtio"));
+    CHECK(graphics_libraries("ffff0000-ffff1000 r-xp 0 fe:00 3 /usr/lib/libc.so.6\n").empty());
+
     // Without its thread (not started here) a request returns the last status.
     SteamUi ui;
     CHECK(ui.request("away", 10).is_object());

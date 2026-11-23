@@ -248,8 +248,6 @@ Reply execute_slow(const Job& job) {
         env += std::string("IDECK_STEAM_SMALL=") + (a["small_mode"].as_bool(false) ? "1" : "0") + "\n";
         // Keep Steam's own CPU pinning of steamwebhelper (only for A/B tests).
         env += std::string("IDECK_STEAM_PIN=") + (a["pin_webhelper"].as_bool(false) ? "1" : "0") + "\n";
-        // Fewer Chromium processes and less drawing work (ideck-steam-launch).
-        env += std::string("IDECK_STEAM_CEF_LEAN=") + (a["cef_lean"].as_bool(false) ? "1" : "0") + "\n";
         // Experimental: steamwebhelper's OpenGL through Zink (Vulkan/Venus).
         env += std::string("IDECK_STEAM_WEBHELPER_GL=") + (a["webhelper_zink"].as_bool(false) ? "zink" : "") + "\n";
         // /var/lib/ideck is read by the launcher; the copy on the library
@@ -283,6 +281,12 @@ Reply execute_slow(const Job& job) {
         } else {
             rep.result.set("daemon", g_steam_ui.status());
         }
+        return rep;
+    }
+    if (job.op == "steam.webhelpers") {
+        // Steam's Chromium processes: role and graphics libraries (which
+        // GL/Vulkan driver the UI really uses).
+        rep.result.set("processes", agent::webhelper_report());
         return rep;
     }
     if (job.op == "steam.open") {

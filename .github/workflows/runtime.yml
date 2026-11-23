@@ -27,6 +27,9 @@ on:
       tb_cache_mb:
         description: Boot test only - TCG translation cache in MiB (384 on the iPad up to build 30, 1024 from build 31)
         default: "1024"
+      cpu_model:
+        description: Boot test only - QEMU CPU model (neoverse-n1 is the app's default)
+        default: neoverse-n1
       boot_test:
         description: Run the boot test (adds ~1-3 hours)
         type: boolean
@@ -105,8 +108,10 @@ jobs:
           # check (about 2 min after start) shows whether it installs again.
           # tb_cache_mb: the TCG cache size to test (384 MiB is what a 4 GiB
           # guest got on the iPad up to build 30, 1024 from build 31); the
-          # lean A/B restarts Steam without and with the lean Chromium options.
-          EXTRA="--steam-observe 300 --tb-cache-mb ${{ inputs.tb_cache_mb || '1024' }} --steam-lean-ab"
+          # Zink check restarts Steam with its UI drawn through Zink (CI's
+          # Vulkan is lavapipe, so it checks that it draws, not the speed).
+          EXTRA="--steam-observe 300 --tb-cache-mb ${{ inputs.tb_cache_mb || '1024' }} --steam-zink-check"
+          EXTRA="$EXTRA --cpu-model ${{ inputs.cpu_model || 'neoverse-n1' }}"
           if [ "${{ inputs.steam_software_ui }}" = "true" ]; then
             EXTRA="$EXTRA --steam-software-ui"
           else

@@ -253,8 +253,6 @@ def main() -> int:
                     help="TCG translation cache (tb-size); the iPad uses 384 for a 4 GiB guest")
     ap.add_argument("--steam-pin-ab", action="store_true",
                     help="restart Steam with and without Steam's CPU pinning of steamwebhelper and time its window")
-    ap.add_argument("--steam-lean-ab", action="store_true",
-                    help="restart Steam without and with the lean Chromium options (cef_lean) and compare")
     ap.add_argument("--steam-zink-check", action="store_true",
                     help="restart Steam with its UI on the GPU through Zink and check that the window draws")
     a = ap.parse_args()
@@ -470,6 +468,11 @@ def main() -> int:
         jit("steam-window")
         if window_seen_at is not None:
             top("steam-visible")
+            try:
+                report["webhelpers"] = agent.request("steam.webhelpers", timeout=60).get("processes")
+                log("steam-webhelpers", report["webhelpers"])
+            except Exception as e:  # noqa: BLE001
+                log("steam-webhelpers", str(e), ok=False)
             ui: dict = {}
             try:
                 ui["visible_cpu"] = cpu_average(60)
@@ -493,8 +496,7 @@ def main() -> int:
         # it until the sign-in window is drawn again (a blank screen is ~4 KB
         # as PNG, the sign-in window ~34 KB), then sample processes and CPU.
         # --steam-pin-ab: Steam's own CPU pinning of steamwebhelper (2-6)
-        # kept versus iDeck's override. --steam-lean-ab: the lean Chromium
-        # options (cef_lean) off versus on.
+        # kept versus iDeck's override.
         def restart_timing(label: str, options: dict) -> dict:
             res: dict = dict(options)
             try:
@@ -533,17 +535,17 @@ def main() -> int:
                 "unpinned": restart_timing("unpinned", {"pin_webhelper": False}),
             }
             jit("after-pin-ab")
-        if a.steam_lean_ab and window_seen_at is not None:
-            report["lean_ab"] = {
-                "default": restart_timing("default", {"cef_lean": False}),
-                "lean": restart_timing("lean", {"cef_lean": True}),
-            }
-            jit("after-lean-ab")
         if a.steam_zink_check and window_seen_at is not None:
             # GPU-drawn Steam UI through Zink. CI's Vulkan is lavapipe (CPU),
             # so this checks that the window draws, not how fast.
             report["zink_check"] = restart_timing("zink", {"cef_software": False, "webhelper_zink": True})
+            try:
+                report["zink_check"]["webhelpers"] = agent.request("steam.webhelpers", timeout=60).get("processes")
+                log("steam-webhelpers-zink", report["zink_check"]["webhelpers"])
+            except Exception as e:  # noqa: BLE001
+                log("steam-webhelpers-zink", str(e), ok=False)
             restart_timing("back-to-default", {"webhelper_zink": False})
+            jit("after-zink")
 
         # A Steam restart (the next iDeck launch) must not install the
         # client again: with the bootstrap's package/*.manifest the updater
