@@ -189,6 +189,24 @@ TEST("memory: TCG cache grows into headroom, never past the limit") {
     CHECK_EQ(p.tb_cache_mb, 256u);
 }
 
+TEST("memory: the JIT's cache bound wins over headroom") {
+    // Same iPad as above; iPadOS 27 with StikDebug preparing the cache.
+    MemoryInputs in;
+    in.physical_mb = 11524;
+    in.app_limit_mb = 12288;
+    in.increased_memory_limit = true;
+    in.cpus = 6;
+    in.ram_file = true;
+    in.tb_cache_max_mb = 384;
+    MemoryPlan p = plan_memory(in);
+    CHECK(p.fits);
+    CHECK_EQ(p.guest_mb, 4096u);
+    CHECK_EQ(p.tb_cache_mb, 384u);
+    // A bound above what the plan picks changes nothing.
+    in.tb_cache_max_mb = 2048;
+    CHECK_EQ(plan_memory(in).tb_cache_mb, 1024u);
+}
+
 TEST("memory: measured M5 limit (5120 MiB) gives a 3 GiB guest") {
     // From the first device run: iPad17,2, iPadOS 27.2, 5110 MiB available
     // at launch with a 9 MiB footprint.

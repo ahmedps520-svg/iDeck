@@ -69,7 +69,7 @@ final class RuntimeController: ObservableObject {
     private var observers: [NSObjectProtocol] = []
 
     /// "jit" for the sideload edition, "se" for the interpreter (TestFlight) edition.
-    static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
+    nonisolated static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
 
     /// Venus (Vulkan) blob memory is POSIX shared memory named under an app
     /// group (UTM's virglrenderer, anon_file.c); iOS refuses the name unless
@@ -556,14 +556,27 @@ final class RuntimeController: ObservableObject {
             let console = DiagLog.tail(Paths.consoleLog, lines: 1).isEmpty ? "no console output" : "console has output"
             var parts = ["boot probe at \(Int(at)) s: \(console)"]
             if let status = try? await qmp.status() { parts.append("status \(status)") }
+            var jitNeverRan = false
             if let jit = try? await qmp.execute("human-monitor-command", ["command-line": "info jit"]) as? String {
                 parts.append("jit: " + BootProbeParsing.jitSummary(jit))
+                jitNeverRan = (BootProbeParsing.tbCount(jit) ?? 2) <= 1
             }
             if let regs = try? await qmp.execute("human-monitor-command", ["command-line": "info registers -a"]) as? String {
                 parts.append("vCPUs: " + BootProbeParsing.vcpuSummary(regs))
             }
             parts.append("threads: " + IDPlatform.threadActivitySummary())
             DiagLog.write(parts.joined(separator: "; "))
+            if jitNeverRan, case .booting = phase {
+                // A normal boot translates thousands of blocks in its first
+                // second. One block after 20 s: the generated code does not
+                // run (build 40), and only a fresh process gets new JIT memory.
+                DiagLog.write("boot: JIT memory does not run; Linux cannot start in this session")
+                EngineGuard.clear(Paths.nativeFPMarker)  // says nothing about the engine options
+                relaunchReason = "Linux could not start: the JIT memory StikDebug prepared does not run. "
+                    + "Close iDeck from the app switcher, open it again and enable JIT."
+                phase = .needsRelaunch
+                return
+            }
         }
     }
 
@@ -602,6 +615,7 @@ final class RuntimeController: ObservableObject {
         DiagLog.write("connecting QMP")
         try await qmp.connect(path: Paths.qmpSocket.path)
         DiagLog.write("QMP ready (QEMU main loop running)")
+        DiagLog.write("jit memory: executable \(IDPlatform.jitRegionSummary); \(IDPlatform.addressSpaceSummary)")
 
         let agent = AgentClient()
         agent.onEvent = { [weak self] event, data in

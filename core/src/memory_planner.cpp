@@ -144,6 +144,7 @@ MemoryPlan plan_memory(const MemoryInputs& in) {
             if (tb > p.tb_cache_mb && rest + tb <= limit) p.tb_cache_mb = tb;
         }
     }
+    if (in.tb_cache_max_mb) p.tb_cache_mb = std::min(p.tb_cache_mb, in.tb_cache_max_mb);
     // The hostmem BAR is guest-physical address space for mapping Venus
     // blobs; it is not allocated up front. Kept moderate to limit host VA use.
     p.hostmem_mb = in.vulkan ? (chosen >= 4096 ? 4096 : 2048) : 0;

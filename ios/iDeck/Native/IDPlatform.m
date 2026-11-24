@@ -141,6 +141,46 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
                                       quiet ? [NSString stringWithFormat:@" (+%d quiet)", quiet] : @""];
 }
 
++ (NSString *)jitRegionSummary {
+    // Adjacent executable entries are joined: pages the debugger wrote to may
+    // each become an entry of their own.
+    NSMutableArray<NSString *> *runs = [NSMutableArray array];
+    vm_address_t addr = 0;
+    __block vm_address_t runStart = 0, runEnd = 0;
+    __block unsigned entries = 0;
+    void (^flush)(void) = ^{
+        if (runEnd - runStart >= (64ull << 20)) {
+            [runs addObject:[NSString stringWithFormat:@"0x%llx-0x%llx (%llu MiB in %u entr%@)",
+                             (unsigned long long)runStart, (unsigned long long)runEnd,
+                             (unsigned long long)((runEnd - runStart) >> 20), entries, entries == 1 ? @"y" : @"ies"]];
+        }
+    };
+    for (;;) {
+        vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        if (vm_region_64(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
+                         &count, &object) != KERN_SUCCESS) break;
+        if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
+        if ((info.protection & VM_PROT_EXECUTE) && addr == runEnd && entries > 0) {
+            runEnd = addr + size;
+            entries++;
+        } else {
+            flush();
+            entries = 0;
+            if (info.protection & VM_PROT_EXECUTE) {
+                runStart = addr;
+                runEnd = addr + size;
+                entries = 1;
+            }
+        }
+        addr += size;
+    }
+    flush();
+    return runs.count ? [runs componentsJoinedByString:@", "] : @"none of 64 MiB or more";
+}
+
 + (uint64_t)physicalMemory {
     return NSProcessInfo.processInfo.physicalMemory;
 }

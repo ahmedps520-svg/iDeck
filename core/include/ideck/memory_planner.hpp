@@ -33,6 +33,9 @@ struct MemoryInputs {
     // charges a quarter of guest RAM to the limit, and instead caps guest RAM
     // by device RAM, since paging guest memory to flash is slow.
     bool ram_file = false;
+    // Largest TCG code cache the JIT can use, in MiB; 0 = no bound. The iOS
+    // app sets it where the debugger has to prepare the cache (iPadOS 26+).
+    uint64_t tb_cache_max_mb = 0;
 };
 
 struct MemoryPlan {

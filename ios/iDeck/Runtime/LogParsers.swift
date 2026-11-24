@@ -116,6 +116,15 @@ enum BootProbeParsing {
         return out.isEmpty ? "no counters (\(text.prefix(80)))" : out.joined(separator: ", ")
     }
 
+    /// "TB count" of HMP "info jit": translated blocks in the cache.
+    static func tbCount(_ text: String) -> Int? {
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let words = raw.split(separator: " ")
+            if words.count >= 3, words[0] == "TB", words[1] == "count" { return Int(words[2]) }
+        }
+        return nil
+    }
+
     /// Program counter and exception level of each vCPU from HMP
     /// "info registers -a" (target/arm aarch64_cpu_dump_state), e.g.
     /// "0 PC=ffff800080e1c2a4 EL1h, 1 PC=0000000040000000 EL1h".

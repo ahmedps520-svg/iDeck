@@ -216,6 +216,9 @@ check(BootProbeParsing.jitSummary(jitText)
       == "gen code size 27486532/1073736704, TB count 61290, TB flush count 0, TB invalidate count 1923, TLB full flushes 12",
       "info jit summary: \(BootProbeParsing.jitSummary(jitText))")
 check(BootProbeParsing.jitSummary("x-query-jit: not supported").hasPrefix("no counters"), "info jit summary without counters")
+check(BootProbeParsing.tbCount(jitText) == 61290, "info jit TB count")
+check(BootProbeParsing.tbCount("TB count            1\n") == 1, "info jit TB count of a stuck start")
+check(BootProbeParsing.tbCount("x-query-jit: not supported") == nil, "info jit TB count missing")
 let regsText = """
 
 CPU#0

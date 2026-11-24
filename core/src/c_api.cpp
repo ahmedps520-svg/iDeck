@@ -89,6 +89,7 @@ const std::map<std::string, Handler>& handlers() {
              in.cpus = static_cast<int>(a["cpus"].as_int(4));
              in.vulkan = a["vulkan"].as_bool(true);
              in.ram_file = a["ram_file"].as_bool(false);
+             in.tb_cache_max_mb = u64(a, "tb_cache_max_mb");
              return plan_memory(in).to_json();
          }},
         {"memory.pressure",

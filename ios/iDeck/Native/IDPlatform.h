@@ -29,6 +29,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// current CPU use and total CPU seconds. Shows whether QEMU's vCPU threads
 /// are executing or blocked when Linux shows nothing.
 + (NSString *)threadActivitySummary;
+/// Runs of executable memory of 64 MiB or more (QEMU's TCG cache), e.g.
+/// "0x2a0000000-0x2b8000000 (384 MiB in 1 entry)".
+@property (class, nonatomic, readonly) NSString *jitRegionSummary;
 @property (class, nonatomic, readonly) uint64_t physicalMemory;
 /// e.g. "iPad17,1"
 @property (class, nonatomic, readonly) NSString *modelIdentifier;
