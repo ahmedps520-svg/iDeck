@@ -148,6 +148,22 @@ final class RuntimeController: ObservableObject {
         if let previous = SessionMarker.takePrevious() {
             DiagLog.write(previous.logLine)
             previousSessionNotice = previous.userMessage
+            // "vkr-ring" threads run Linux's Vulkan commands in MoltenVK. With
+            // Steam's interface drawn by the GPU (experimental) iDeck crashed
+            // there on device: SIGSEGV in vkCmdBindPipeline, build 41.
+            if previous.signal != nil, previous.crashThread?.hasPrefix("vkr-") == true {
+                var changed = Settings.load()
+                if changed.steamGpuUI {
+                    changed.steamGpuUI = false
+                    changed.save()
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
+                    }
+                    DiagLog.write("steam: GPU-drawn UI switched off after a crash on \(previous.crashThread ?? "?")")
+                    previousSessionNotice = "iDeck crashed in the graphics driver while Steam's interface was drawn by the GPU, "
+                        + "so GPU-drawn Steam UI was switched off. It is experimental; you can switch it back on in Settings."
+                }
+            }
         }
         refreshInstalledState()
         memory.apply = { [weak self] actions in await self?.applyPressure(actions) }
@@ -613,6 +629,13 @@ final class RuntimeController: ObservableObject {
         // QEMU dies during startup.
         self.qmp = qmp
         DiagLog.write("connecting QMP")
+        // On device a start froze here with nothing more in the log (build
+        // 41). If QEMU has not answered after 12 s, record where every
+        // thread is, from a queue that does not need the main thread.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 12) { [weak qmp] in
+            guard let qmp, !qmp.isReady else { return }
+            DiagLog.write("boot: QEMU has not answered after 12 s; threads:\n  " + IDPlatform.threadStackSummary())
+        }
         try await qmp.connect(path: Paths.qmpSocket.path)
         DiagLog.write("QMP ready (QEMU main loop running)")
         DiagLog.write("jit memory: executable \(IDPlatform.jitRegionSummary); \(IDPlatform.addressSpaceSummary)")
@@ -991,6 +1014,10 @@ final class RuntimeController: ObservableObject {
     private var steamScreenSent: SteamScreen?
     private var gameLaunchPending = false
     private var gameWatch: Task<Void, Never>?
+    /// A game process runs in Linux (steam-ui-daemon), however it was
+    /// started. Kept current while the Linux screen is shown; the game view
+    /// picks the pointer mode from it.
+    @Published private(set) var gameRunning = false
 
     @discardableResult
     func setSteamScreen(_ wanted: SteamScreen, reason: String) -> Task<Void, Never> {
@@ -998,7 +1025,7 @@ final class RuntimeController: ObservableObject {
         steamScreen = s
         gameWatch?.cancel()
         gameWatch = nil
-        if s == .game { watchGame() }
+        if s == .game { watchGame() } else if s == .visible { watchForGame() }
         return Task { await sendSteamScreen(reason: reason) }
     }
 
@@ -1047,14 +1074,9 @@ final class RuntimeController: ObservableObject {
             var seenRunning = false
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                guard let self, !Task.isCancelled, self.steamScreen == .game, let agent = self.agent else { return }
-                // steam.ui without a state only reads the daemon's status file.
-                let st = (try? await agent.requestDict("steam.ui", [:], timeout: 10)) ?? [:]
-                let running = ((st["daemon"] as? [String: Any])?["game_running"] as? Bool) ?? false
-                if running && !seenRunning {
-                    seenRunning = true
-                    DiagLog.write("steam ui: game process running")
-                }
+                guard let self, !Task.isCancelled, self.steamScreen == .game else { return }
+                let running = await self.readGameRunning()
+                if running { seenRunning = true }
                 if seenRunning && !running {
                     self.setSteamScreen(.visible, reason: "game exited")
                     return
@@ -1065,6 +1087,29 @@ final class RuntimeController: ObservableObject {
                 }
             }
         }
+    }
+
+    /// With Steam on screen: notices a game started from Steam's own window.
+    private func watchForGame() {
+        gameWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, !Task.isCancelled, self.steamScreen == .visible else { return }
+                _ = await self.readGameRunning()
+            }
+        }
+    }
+
+    private func readGameRunning() async -> Bool {
+        guard let agent, case .running = phase else { return false }
+        // steam.ui without a state only reads the daemon's status file.
+        let st = (try? await agent.requestDict("steam.ui", [:], timeout: 10)) ?? [:]
+        let running = ((st["daemon"] as? [String: Any])?["game_running"] as? Bool) ?? false
+        if running != gameRunning {
+            gameRunning = running
+            DiagLog.write("steam ui: game process \(running ? "running" : "ended")")
+        }
+        return running
     }
 
     func restartSteam() async {

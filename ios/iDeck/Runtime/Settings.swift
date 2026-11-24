@@ -42,13 +42,15 @@ struct Settings: Codable, Equatable {
     /// 38+, sideload edition). CI on an ARM64 host: every listed
     /// instruction gives the same bits as hardware; see docs/CPU_ENGINE.md.
     /// RuntimeController turns it off by itself if Linux did not come up
-    /// with it.
-    var nativeFloatingPoint = true
+    /// with it. Off by default since build 42: on the M5 iPad the two starts
+    /// with the engine options on froze as QEMU started (build 41), and
+    /// they have not yet run on a device.
+    var nativeFloatingPoint = false
     /// QEMU keeps Linux's kernel address translations when Linux switches
     /// between programs, instead of emptying its translation cache each
     /// time (iDeck's engine patch 0002). CI: a switch cost about half.
-    /// Same guard as nativeFloatingPoint.
-    var fastProcessSwitch = true
+    /// Same guard and default as nativeFloatingPoint.
+    var fastProcessSwitch = false
     /// Settings written before version 2 had neoverse-n1 as the default CPU
     /// model; load() moves those to the new default once.
     var settingsVersion = 2

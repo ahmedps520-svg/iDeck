@@ -4,6 +4,7 @@
 #import <Metal/Metal.h>
 
 #import <arpa/inet.h>
+#import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
 #import <mach/mach.h>
@@ -106,6 +107,67 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
     return [NSString stringWithFormat:@"vCPU threads (base priority): %@; raised to user-interactive: %d%@",
                                       [found componentsJoinedByString:@", "], raised,
                                       failed ? [NSString stringWithFormat:@", failed: %d", failed] : @""];
+}
+
+static NSString *IDDescribeAddress(uint64_t addr) {
+    Dl_info info;
+    if (addr && dladdr((const void *)(uintptr_t)addr, &info) && info.dli_fname) {
+        const char *base = strrchr(info.dli_fname, '/');
+        base = base ? base + 1 : info.dli_fname;
+        if (info.dli_sname) {
+            return [NSString stringWithFormat:@"%s %s+%llu", base, info.dli_sname,
+                    (unsigned long long)(addr - (uint64_t)(uintptr_t)info.dli_saddr)];
+        }
+        return [NSString stringWithFormat:@"%s+0x%llx", base,
+                (unsigned long long)(addr - (uint64_t)(uintptr_t)info.dli_fbase)];
+    }
+    return [NSString stringWithFormat:@"0x%llx", (unsigned long long)addr];
+}
+
++ (NSString *)threadStackSummary {
+    thread_act_array_t threads = NULL;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) return @"threads: unavailable";
+    static const char *states[] = {"?", "running", "stopped", "waiting", "uninterruptible", "halted"};
+    NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    thread_t me = mach_thread_self();
+    for (mach_msg_type_number_t i = 0; i < count; i++) {
+        thread_extended_info_data_t info;
+        mach_msg_type_number_t n = THREAD_EXTENDED_INFO_COUNT;
+        NSString *name = @"";
+        int state = 0;
+        double seconds = 0;
+        if (thread_info(threads[i], THREAD_EXTENDED_INFO, (thread_info_t)&info, &n) == KERN_SUCCESS) {
+            info.pth_name[sizeof(info.pth_name) - 1] = 0;
+            name = [NSString stringWithUTF8String:info.pth_name] ?: @"";
+            state = info.pth_run_state;
+            seconds = (double)(info.pth_user_time + info.pth_system_time) / 1e9;
+        }
+        if (name.length == 0) name = [NSString stringWithFormat:@"#%u", i];
+        NSString *where = @"this thread";
+        if (threads[i] != me) {
+            arm_thread_state64_t ts;
+            mach_msg_type_number_t tn = ARM_THREAD_STATE64_COUNT;
+            // The thread is stopped only for the read: nothing is
+            // allocated meanwhile (it may hold the allocator's lock).
+            kern_return_t kr = KERN_FAILURE;
+            if (thread_suspend(threads[i]) == KERN_SUCCESS) {
+                kr = thread_get_state(threads[i], ARM_THREAD_STATE64, (thread_state_t)&ts, &tn);
+                thread_resume(threads[i]);
+            }
+            where = kr == KERN_SUCCESS
+                ? [NSString stringWithFormat:@"at %@, from %@",
+                   IDDescribeAddress((uint64_t)arm_thread_state64_get_pc(ts)),
+                   IDDescribeAddress((uint64_t)arm_thread_state64_get_lr(ts))]
+                : @"state unavailable";
+        }
+        [lines addObject:[NSString stringWithFormat:@"%@ [%s, %.1f s] %@", name,
+                          states[(state >= 1 && state <= 5) ? state : 0], seconds, where]];
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    mach_port_deallocate(mach_task_self(), me);
+    vm_deallocate(mach_task_self(), (vm_address_t)threads, count * sizeof(thread_act_t));
+    return [lines componentsJoinedByString:@"\n  "];
 }
 
 + (NSString *)threadActivitySummary {

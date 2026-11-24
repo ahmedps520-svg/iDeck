@@ -198,6 +198,37 @@ check(!fpBad.ok && fpBad.text == "native: 2 of 189 instruction patterns differ f
 let fpNone = EngineGuard.checkSummary(fpReply(#"{"reference": false, "patterns": 0, "match": false}"#), nativeFP: true)
 check(!fpNone.ok && fpNone.text.contains("no hardware reference"), "fpcheck summary without a reference")
 
+// crash.log entry from the device (build 41, GPU-drawn Steam UI).
+let gpuCrash = """
+
+=== iDeck crash: SIGSEGV (11) at 0x0000000000000688 code 2 thread 'vkr-ring-6' time 1795516854
+0   iDeck                               0x0000000100de42ac iDeck + 17068
+2   MoltenVK                            0x000000015cf4ce80 _ZN16MVKCommandBuffer18recordBindPipelineEP18MVKCmdBindPipeline + 36
+=== end
+"""
+check(SessionLogParsing.crashThread(in: gpuCrash, since: 1795516000) == "vkr-ring-6", "crash thread of a session's entry")
+check(SessionLogParsing.crashThread(in: gpuCrash, since: 1795517000) == nil, "crash thread: older entries are not this session's")
+check(SessionLogParsing.crashSignal(in: gpuCrash, since: 1795516000) == "SIGSEGV", "crash signal of the same entry")
+
+// Pointer mode and movement.
+check(PointerMode.automatic.usesTrackpad(gameRunning: true) && !PointerMode.automatic.usesTrackpad(gameRunning: false),
+      "pointer: automatic is trackpad only while a game runs")
+check(!PointerMode.touch.usesTrackpad(gameRunning: true) && PointerMode.trackpad.usesTrackpad(gameRunning: false),
+      "pointer: a chosen mode wins over the game")
+var motion = RelativeMotion()
+var movedX = 0, movedY = 0
+for _ in 0..<8 {
+    let step = motion.add(dx: 0.25, dy: -0.25)
+    movedX += step.x
+    movedY += step.y
+}
+check(movedX == 2 && movedY == -2, "pointer: slow movement adds up (\(movedX), \(movedY))")
+let big = motion.add(dx: 5.75, dy: 0)
+let rest = motion.add(dx: 0.25, dy: 0)
+check(big.x == 5 && rest.x == 1, "pointer: the fraction is carried over")
+motion.reset()
+check(motion.add(dx: 0.5, dy: 0.5) == (0, 0), "pointer: reset drops the carried fraction")
+
 // HMP output as QEMU 10 prints it (accel/tcg/monitor.c, target/arm/cpu.c).
 let jitText = """
 Translation buffer state:

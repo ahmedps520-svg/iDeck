@@ -18,6 +18,20 @@ enum SessionLogParsing {
         return found
     }
 
+    /// Thread name of the last crash.log entry written at or after `since`.
+    static func crashThread(in crashLog: String, since: Double) -> String? {
+        var found: String?
+        for line in crashLog.split(separator: "\n") where line.hasPrefix("=== iDeck crash: ") {
+            let words = line.split(separator: " ")
+            guard let t = words.lastIndex(of: "time"), t + 1 < words.count,
+                  let when = Double(words[t + 1]), when >= since.rounded(.down),
+                  let open = line.range(of: " thread '"),
+                  let close = line.range(of: "' time ", range: open.upperBound..<line.endIndex) else { continue }
+            found = String(line[open.upperBound..<close.lowerBound])
+        }
+        return found
+    }
+
     /// Where the app last was according to its "app: <state>" trace lines:
     /// active, inactive, background, foreground or terminating (memory
     /// warnings and thermal changes are not placements).

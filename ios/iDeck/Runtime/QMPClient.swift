@@ -18,6 +18,13 @@ final class QMPClient {
     var onEvent: ((String, [String: Any]) -> Void)?
     var onClose: (() -> Void)?
 
+    /// QEMU has answered the capabilities handshake (any thread).
+    var isReady: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return ready
+    }
+
     /// Connects and waits for QEMU's greeting. QEMU only greets once its main
     /// loop runs, so a QEMU stuck during initialisation surfaces here as a
     /// timeout instead of an endless wait.

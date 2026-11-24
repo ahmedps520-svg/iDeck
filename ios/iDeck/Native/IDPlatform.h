@@ -29,6 +29,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// current CPU use and total CPU seconds. Shows whether QEMU's vCPU threads
 /// are executing or blocked when Linux shows nothing.
 + (NSString *)threadActivitySummary;
+/// One line per thread: name, run state, CPU seconds, and the code it is
+/// in and was called from (image and nearest symbol). For a start that
+/// hangs; safe to call from any thread.
++ (NSString *)threadStackSummary;
 /// Runs of executable memory of 64 MiB or more (QEMU's TCG cache), e.g.
 /// "0x2a0000000-0x2b8000000 (384 MiB in 1 entry)".
 @property (class, nonatomic, readonly) NSString *jitRegionSummary;

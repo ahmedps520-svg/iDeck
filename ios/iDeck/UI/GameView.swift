@@ -9,14 +9,16 @@ struct GameView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var runtime: RuntimeController
     @State private var showMenu = false
-    @State private var captureMouse = false
+    @State private var pointerMode: PointerMode = .automatic
+    @State private var pointerHint: String?
+    @State private var pointerHintID = 0
     @State private var showKeyboard = false
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let spice = runtime.spice, runtime.isRunning {
-                DisplayRepresentable(spice: spice, captureMouse: captureMouse, showKeyboard: showKeyboard)
+                DisplayRepresentable(spice: spice, captureMouse: trackpad, showKeyboard: showKeyboard)
                     .ignoresSafeArea()
             }
             overlay
@@ -35,6 +37,25 @@ struct GameView: View {
             UIApplication.shared.isIdleTimerDisabled = false
             runtime.gameViewDisappeared()
         }
+        .onChange(of: trackpad) { on in showPointerHint(on) }
+        .onChange(of: runtime.gameRunning) { running in
+            // A choice made for one game does not carry over to the next.
+            if !running { pointerMode = .automatic }
+        }
+    }
+
+    /// Movement ("trackpad") instead of positions; see PointerMode.
+    private var trackpad: Bool { pointerMode.usesTrackpad(gameRunning: runtime.gameRunning) }
+
+    private func showPointerHint(_ trackpad: Bool) {
+        DiagLog.write("pointer: \(trackpad ? "trackpad" : "touch") (\(pointerMode.rawValue), "
+                      + "game running \(runtime.gameRunning))")
+        pointerHint = trackpad ? PointerMode.trackpadHint : PointerMode.touchHint
+        pointerHintID += 1
+        let id = pointerHintID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+            if pointerHintID == id { pointerHint = nil }
+        }
     }
 
     @ViewBuilder
@@ -49,8 +70,12 @@ struct GameView: View {
                     }
                     Spacer()
                     Menu {
-                        Button { captureMouse.toggle() } label: {
-                            Label(captureMouse ? "Release Mouse" : "Capture Mouse (games)", systemImage: "cursorarrow.motionlines")
+                        Picker(selection: $pointerMode) {
+                            ForEach(PointerMode.allCases, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        } label: {
+                            Label("Pointer", systemImage: "cursorarrow.motionlines")
                         }
                         Button { showKeyboard.toggle() } label: {
                             Label(showKeyboard ? "Hide Keyboard" : "Show Keyboard", systemImage: "keyboard")
@@ -80,6 +105,16 @@ struct GameView: View {
                     }
                 }
                 Spacer()
+                if let pointerHint {
+                    Text(pointerHint)
+                        .font(.footnote.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 9)
+                        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal, 24).padding(.bottom, 18)
+                        .allowsHitTesting(false)
+                }
             }
         case .starting(let s), .booting(let s):
             BootProgressView(status: s)
@@ -234,7 +269,18 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     private var mouseCaptured = false
     private var keyboardVisible = false
     private var lastPan: CGPoint = .zero
+    private var lastLongPress: CGPoint = .zero
+    private var motion = RelativeMotion()
+    /// Trackpad mode: a finger is moving the pointer.
+    private var panActive = false
+    /// Trackpad mode: the second finger that holds the left button.
+    private var fireTouch: UITouch?
     private var mouseObserver: NSObjectProtocol?
+
+    /// Trackpad mode: pointer travel on screen per finger travel.
+    private static let trackpadGain: CGFloat = 1.4
+    /// How long a tap holds the mouse button down.
+    private static let clickHold: TimeInterval = 0.06
 
     init(spice: IDSpiceClient) {
         self.spice = spice
@@ -312,6 +358,10 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     func setMouseCaptured(_ on: Bool) {
         guard on != mouseCaptured else { return }
         mouseCaptured = on
+        motion.reset()
+        lastPan = .zero
+        panActive = false
+        releaseFireTouch()
         spice.requestRelativeMouse(on)
         setNeedsUpdateOfPrefersPointerLocked()
     }
@@ -352,41 +402,108 @@ final class DisplayViewController: UIViewController, UIKeyInput {
     private var lastTwoFingerPan: CGPoint = .zero
 
     @objc private func tapped(_ r: UITapGestureRecognizer) {
-        let p = guestPoint(r.location(in: view))
-        spice.sendMouseAbsolute(p, buttons: [])
-        spice.sendMouseButton(.left, pressed: true, buttons: .left)
-        spice.sendMouseButton(.left, pressed: false, buttons: [])
+        click(.left, at: r.location(in: view))
     }
 
     @objc private func rightClick(_ r: UITapGestureRecognizer) {
-        let p = guestPoint(r.location(in: view))
-        spice.sendMouseAbsolute(p, buttons: [])
-        spice.sendMouseButton(.right, pressed: true, buttons: .right)
-        spice.sendMouseButton(.right, pressed: false, buttons: [])
+        click(.right, at: r.location(in: view))
+    }
+
+    /// A click where the finger is (touch mode) or where the pointer is
+    /// (trackpad mode). The button stays down for a moment: a game that
+    /// reads the button state once per frame misses a press and a release
+    /// that arrive together.
+    private func click(_ b: IDMouseButton, at viewPoint: CGPoint) {
+        if !mouseCaptured { spice.sendMouseAbsolute(guestPoint(viewPoint), buttons: buttons) }
+        buttons.insert(b)
+        spice.sendMouseButton(b, pressed: true, buttons: buttons)
+        DispatchQueue.main.asyncAfter(deadline: .now() + DisplayViewController.clickHold) { [weak self] in
+            guard let self else { return }
+            self.buttons.remove(b)
+            self.spice.sendMouseButton(b, pressed: false, buttons: self.buttons)
+        }
+    }
+
+    /// Trackpad mode: moves the pointer by a finger movement in view points.
+    private func moveRelative(_ d: CGPoint) {
+        // Guest pixels per view point, so the pointer travels as far on
+        // screen as the finger does, times the gain.
+        let perPoint = spice.pointsPerGuestPixel > 0 ? 1 / spice.pointsPerGuestPixel : 1
+        let k = Double(perPoint * DisplayViewController.trackpadGain)
+        sendRelative(dx: Double(d.x) * k, dy: Double(d.y) * k)
+    }
+
+    private func sendRelative(dx: Double, dy: Double) {
+        let step = motion.add(dx: dx, dy: dy)
+        if step.x != 0 || step.y != 0 {
+            spice.sendMouseRelative(CGPoint(x: step.x, y: step.y), buttons: buttons)
+        }
     }
 
     @objc private func longPressed(_ r: UILongPressGestureRecognizer) {
-        // Long-press then drag = left-button drag (select, drag windows).
-        let p = guestPoint(r.location(in: view))
+        // Long-press then drag = left-button drag (select, drag windows);
+        // in trackpad mode the pointer moves with the finger, button held.
+        let v = r.location(in: view)
+        let p = guestPoint(v)
         switch r.state {
         case .began:
-            spice.sendMouseAbsolute(p, buttons: [])
+            if !mouseCaptured { spice.sendMouseAbsolute(p, buttons: []) }
+            lastLongPress = v
             buttons.insert(.left)
             spice.sendMouseButton(.left, pressed: true, buttons: buttons)
         case .changed:
-            spice.sendMouseAbsolute(p, buttons: buttons)
+            if mouseCaptured {
+                moveRelative(CGPoint(x: v.x - lastLongPress.x, y: v.y - lastLongPress.y))
+                lastLongPress = v
+            } else {
+                spice.sendMouseAbsolute(p, buttons: buttons)
+            }
         default:
             buttons.remove(.left)
             spice.sendMouseButton(.left, pressed: false, buttons: buttons)
         }
     }
 
+    // Trackpad mode: while one finger moves the pointer, a second finger
+    // holds the left button (aim and fire, drag).
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        guard mouseCaptured, panActive, fireTouch == nil,
+              let t = touches.first(where: { $0.type == .direct }) else { return }
+        fireTouch = t
+        buttons.insert(.left)
+        spice.sendMouseButton(.left, pressed: true, buttons: buttons)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        if let f = fireTouch, touches.contains(f) { releaseFireTouch() }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        if let f = fireTouch, touches.contains(f) { releaseFireTouch() }
+    }
+
+    private func releaseFireTouch() {
+        guard fireTouch != nil else { return }
+        fireTouch = nil
+        buttons.remove(.left)
+        spice.sendMouseButton(.left, pressed: false, buttons: buttons)
+    }
+
     @objc private func panned(_ r: UIPanGestureRecognizer) {
         if mouseCaptured {
-            // Games: one-finger drag is trackpad-style relative motion.
+            // Trackpad mode: the pointer follows the finger's movement.
             let t = r.translation(in: view)
-            spice.sendMouseRelative(CGPoint(x: t.x - lastPan.x, y: t.y - lastPan.y), buttons: buttons)
-            lastPan = r.state == .ended ? .zero : t
+            if r.state == .began { lastPan = .zero }
+            moveRelative(CGPoint(x: t.x - lastPan.x, y: t.y - lastPan.y))
+            lastPan = t
+            panActive = r.state == .began || r.state == .changed
+            if !panActive {
+                lastPan = .zero
+                releaseFireTouch()
+            }
         } else {
             // Desktop (Steam): one-finger drag scrolls, like any iPad app.
             // Before, it only moved the pointer, so nothing scrolled.
@@ -459,7 +576,7 @@ final class DisplayViewController: UIViewController, UIKeyInput {
             guard let input = mouse.mouseInput else { continue }
             input.mouseMovedHandler = { [weak self] _, dx, dy in
                 guard let self, self.mouseCaptured else { return }
-                self.spice.sendMouseRelative(CGPoint(x: CGFloat(dx), y: CGFloat(-dy)), buttons: self.buttons)
+                self.sendRelative(dx: Double(dx), dy: Double(-dy))
             }
             input.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in self?.mouseButton(.left, pressed) }
             input.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in self?.mouseButton(.right, pressed) }
@@ -555,5 +672,11 @@ extension DisplayViewController: UIGestureRecognizerDelegate {
         // the zoomed view.
         (g is UIPinchGestureRecognizer && other is UIPanGestureRecognizer)
             || (g is UIPanGestureRecognizer && other is UIPinchGestureRecognizer)
+    }
+
+    func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
+        // Trackpad mode with a finger moving the pointer: a second finger
+        // is the left button, not a pinch or a scroll.
+        !(mouseCaptured && panActive)
     }
 }

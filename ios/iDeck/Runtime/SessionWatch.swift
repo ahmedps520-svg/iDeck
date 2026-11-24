@@ -29,6 +29,8 @@ enum SessionMarker {
         var runtime: String
         /// Signal name when crash.log has an entry from that session.
         var signal: String?
+        /// Name of the thread that crashed, from the same entry.
+        var crashThread: String?
         /// Last app state the previous trace recorded ("foreground", "background", ...).
         var lastAppState: String?
         /// Timestamp of the last line in ideck.previous.log.
@@ -76,6 +78,7 @@ enum SessionMarker {
                          runtime: info["runtime"] as? String ?? "?")
         if let crashes = try? String(contentsOf: Paths.crashLog, encoding: .utf8) {
             p.signal = SessionLogParsing.crashSignal(in: crashes, since: started)
+            p.crashThread = SessionLogParsing.crashThread(in: crashes, since: started)
         }
         let trace = DiagLog.tail(Paths.previousAppLog, lines: 400, maxBytes: 262_144)
         p.lastLogLine = trace.last.flatMap { $0.split(separator: " ").first.map(String.init) }

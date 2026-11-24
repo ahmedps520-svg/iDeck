@@ -58,6 +58,9 @@ typedef NS_OPTIONS(NSUInteger, IDMouseButton) {
 /// Moves zoomed content by `delta` view points (finger travel).
 - (void)panBy:(CGPoint)delta NS_SWIFT_NAME(pan(by:));
 - (void)resetZoom;
+/// Points of the attached view per guest pixel at the current zoom; 0 if
+/// unknown.
+@property (nonatomic, readonly) CGFloat pointsPerGuestPixel;
 /// View point (attached view) -> guest framebuffer pixel, clamped to the
 /// display, accounting for aspect fit, zoom and pan.
 - (CGPoint)guestPointForViewPoint:(CGPoint)point NS_SWIFT_NAME(guestPoint(forViewPoint:));

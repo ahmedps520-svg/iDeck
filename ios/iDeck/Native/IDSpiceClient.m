@@ -242,6 +242,12 @@ static CSInputButton CSButtons(IDMouseButton b) {
          (long)d.monitorID, d.displaySize.width, d.displaySize.height, d.isVisible,
          t ? [NSString stringWithFormat:@"%lux%lu", (unsigned long)t.width, (unsigned long)t.height] : @"none",
          d.vertices != nil, d.cursor != nil];
+        // What Linux shows as its pointer (a game hides it or takes the mouse).
+        if (d.cursor) {
+            [s appendFormat:@" (shown %d, %.0fx%.0f)", d.cursor.isVisible,
+             d.cursor.cursorSize.width, d.cursor.cursorSize.height];
+        }
+        [s appendFormat:@", mouse %@", self.input.serverModeCursor ? @"relative" : @"absolute"];
     }
     if (self.renderer && v) {
         [s appendFormat:@", view %.0fx%.0f scale %.3f paused %d", v.drawableSize.width, v.drawableSize.height,
