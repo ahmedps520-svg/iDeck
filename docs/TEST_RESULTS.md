@@ -547,8 +547,10 @@ model, software-drawn Steam UI as on the iPad):
   counts as failures (14 of 17 checks pass).
 
 **App builds.** Build 37 (run 45356943725) compiled and packaged the final app code
-with both patches; it was a compile check and is not published. Build 38 is the
-published one.
+with both patches; it was a compile check and is not published. Build 38 (run
+45364194034) is the published one, in the SideStore/AltStore feed as 0.1.38. Its
+IPA was downloaded and checked: the embedded QEMU binary contains the property
+names `x-host-vfp`, `x-host-vfp-debug` and `x-asid-keep-global`.
 
 ### iOS app builds (`ios.yml`)
 
