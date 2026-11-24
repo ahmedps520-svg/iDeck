@@ -39,7 +39,7 @@ struct Settings: Codable, Equatable {
     var cpuModel = "max"
     /// Linux's floating-point and SIMD instructions run on the iPad's CPU
     /// instead of in QEMU's software helpers (iDeck's engine patch, build
-    /// 37+, sideload edition). CI on an ARM64 host: every listed
+    /// 38+, sideload edition). CI on an ARM64 host: every listed
     /// instruction gives the same bits as hardware; see docs/CPU_ENGINE.md.
     /// RuntimeController turns it off by itself if Linux did not come up
     /// with it.

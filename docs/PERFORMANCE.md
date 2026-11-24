@@ -31,8 +31,8 @@
 ## Optimisations implemented
 
 - **Memory:** jetsam-aware guest sizing; a bounded TCG cache; balloon with free-page reporting; on pressure the guest drops caches, the balloon inflates, disks sync and UI caches are released. Journald runs in RAM; `vm.swappiness=0`.
-- **Native floating point** (build 37): the embedded QEMU carries iDeck's engine patch. Linux's floating-point and vector math instructions run on the iPad's CPU instead of in QEMU's software routines. In CI, floating-point loops ran 2.4–7.3× faster and all 189 instruction patterns gave the same bits as real hardware. See [CPU_ENGINE](CPU_ENGINE.md#native-floating-point-build-37).
-- **Fast process switching** (build 37): QEMU keeps the kernel's address translations when Linux switches between programs instead of rebuilding all of them. In CI a switch went from 99 µs to 29 µs. See [CPU_ENGINE](CPU_ENGINE.md#process-switches-build-37).
+- **Native floating point** (build 38): the embedded QEMU carries iDeck's engine patch. Linux's floating-point and vector math instructions run on the iPad's CPU instead of in QEMU's software routines. In CI, floating-point loops ran 2.4–7.3× faster and all 189 instruction patterns gave the same bits as real hardware. See [CPU_ENGINE](CPU_ENGINE.md#native-floating-point-build-38).
+- **Fast process switching** (build 38): QEMU keeps the kernel's address translations when Linux switches between programs instead of rebuilding all of them. In CI a switch went from 99 µs to 29 µs. See [CPU_ENGINE](CPU_ENGINE.md#process-switches-build-38).
 - **CPU:** MTTCG; the `neoverse-n1` model avoids PAuth/SVE emulation costs (V1, N2 and A710 start with `pauth=off,sve=off` since build 28); performance profiles set 2, 4 or 6 vCPUs; the agent's input path runs on its own thread.
 - **Kernel:** `mitigations=off nowatchdog kpti=0 transparent_hugepage=never`. `kpti=0` (build 28 / runtime 0.1.9) made system calls 7× faster in CI; see below.
 - **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9; in the guest agent from runtime 0.1.11, which halved its own overhead, see [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen)):
@@ -47,7 +47,7 @@
   - `ideck-steam-launch` puts `/usr/lib/ideck/steam-path` first in Steam's PATH. Its `taskset` starts the web helper unpinned and passes every other call to util-linux. This keeps working after Steam updates itself.
   - CI: `Cpus_allowed_list` of the web helper is 2-3 pinned and 0-3 with the override. The sign-in window after a Steam restart took 90.7 s pinned and 79.0 s unpinned in GPU mode, and 66.6 s against 66.5 s with the software UI. The sign-in screen does little work in parallel; the library does more.
 - **GPU:** zero-copy SPICE GL scanout into an MTKView, presented at the chosen refresh rate.
-- **Refresh rate** (build 37 with runtime 0.1.14): Settings › Display offers 30, 60 and, on ProMotion displays, 120 Hz. Linux's X server paces its programs at that rate and the Metal view presents at it.
+- **Refresh rate** (build 38 with runtime 0.1.14): Settings › Display offers 30, 60 and, on ProMotion displays, 120 Hz. Linux's X server paces its programs at that rate and the Metal view presents at it.
   - Until build 36 the setting had no effect: the view always presented at 60 and Linux ran at its default mode. An earlier version of this page said the view presented at 120; the code said 60.
   - 120 Hz lets a game that can draw more than 60 frames a second show them. It does not make anything draw faster, and Steam's own interface then tries to animate at 120, which costs CPU. 60 stays the default.
 - **Storage:** raw sparse images with `discard=unmap`, `detect-zeroes=unmap`, `aio=threads`; no qcow2 overhead; APFS clones for snapshots.
@@ -182,7 +182,7 @@ The questions above can only be answered on the device. `ideck.log` now records:
 - `vCPU threads (base priority):` for each QEMU `CPU n/TCG` thread. A thread below user-interactive (47) gets a QoS override, so iOS prefers the performance cores; the line shows whether that was needed.
 - `disks after 3 min` / `after 10 min:` flush operations and their total time from QMP `query-blockstats`.
   - Correction (2026-11-23): an earlier version of this page said each flush is an `F_FULLFSYNC`. QEMU 10.0.12 calls `fdatasync()` or `fsync()` (`util/osdep.c`), which on Apple systems does not force the flash to flush. The counters will show whether flushes cost anything on the iPad; nothing suggests they do.
-- `engine: native floating point on (x-host-vfp)` and, about 90 s after Linux is ready, `engine: floating-point check, …` (build 37 with runtime 0.1.13).
+- `engine: native floating point on (x-host-vfp)` and, about 90 s after Linux is ready, `engine: floating-point check, …` (build 38 with runtime 0.1.13).
 
 ## Device run, build 30 (iPad17,2, iPadOS 27.2, paid Apple ID, 2026-11-22)
 

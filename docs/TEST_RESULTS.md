@@ -526,6 +526,30 @@ model, software-drawn Steam UI as on the iPad):
   asking for another rate does nothing there. From runtime 0.1.14
   `set-resolution` builds its own modeline and every rate has its own mode.
 
+**Runtime 0.1.14** (run 45356882414, published; the final patches, both options on):
+- Boot to agent 22.5 s; Steam installed (33 packages) and started; the updater
+  found nothing to download; the sign-in window drew and was minimised and
+  restored as before.
+- `fpcheck` in the image: all 189 patterns and the mixed sequences equal to the
+  build host's CPU, flags included (12.9 s + 4.1 s).
+- Refresh rate: `display.set` switched X to `1280x720_120` (xrandr: 120.00) and
+  back to `1280x720_60` (60.00).
+- Steam restart to the sign-in page: 60.5 s software-drawn; 114.7 s through Zink
+  on lavapipe, still drawn 20 s later.
+- TCG cache flushes: 1 by Steam's window, 2 after the Zink check.
+- Benchmark boots in the same run (helpers / native FP / native FP + kept TLB):
+  fp_scalar 13.9 / 34.0 / 33.4 Mpairs/s, fp_vector 54.9 / 360.3 / 372.3 Melem/s,
+  fp_convert 35.4 / 102.5 / 108.4 Miter/s, ctx_switch 99.7 / 109.2 / 38.3 us.
+  Ubuntu's QEMU 8.2 on the same image: fp_scalar 10.3, fp_vector 37.7,
+  fp_convert 24.2, ctx_switch 89.8 us.
+- Provisioning reports "failed" in every CI run for the same reason as before:
+  the CI guest has software OpenGL and no audio device, which the self-test
+  counts as failures (14 of 17 checks pass).
+
+**App builds.** Build 37 (run 45356943725) compiled and packaged the final app code
+with both patches; it was a compile check and is not published. Build 38 is the
+published one.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

@@ -31,7 +31,7 @@ on:
         description: Boot test only - QEMU CPU model (max is the app's default from build 33)
         default: max
       host_vfp:
-        description: Boot test only - iDeck's QEMU with native floating point and kept kernel TLB entries (the app's defaults from build 37); off = Ubuntu's QEMU
+        description: Boot test only - iDeck's QEMU with native floating point and kept kernel TLB entries (the app's defaults from build 38); off = Ubuntu's QEMU
         type: boolean
         default: true
       engine_options:

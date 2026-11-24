@@ -7,12 +7,12 @@ started in-process. QEMU is not reimplemented. The prompt said not to write a ne
 emulator where an existing one achieves the result, and on iPadOS no hypervisor is
 available, so a binary translator is the only option.
 
-From build 37 the sideload edition embeds that QEMU rebuilt with iDeck's engine
+From build 38 the sideload edition embeds that QEMU rebuilt with iDeck's engine
 patches (`engine/qemu`):
 - the guest's floating-point instructions run on the iPad's CPU: see
-  [Native floating point](#native-floating-point-build-37);
+  [Native floating point](#native-floating-point-build-38);
 - a switch between Linux programs no longer empties QEMU's address-translation
-  cache: see [Process switches](#process-switches-build-37).
+  cache: see [Process switches](#process-switches-build-38).
 
 | Requirement | Where it is met |
 |---|---|
@@ -34,7 +34,7 @@ Default **`neoverse-n1`** (ARMv8.2: LSE atomics, LRCPC, dot product, FP16):
 - It avoids pointer authentication and SVE, which are expensive in TCG and unnecessary here. `max` is offered with `pauth=off,sve=off,sme=off`.
 - Research found a reported QEMU issue: TCG may emit wrong CSSC min/max encodings on hosts that have FEAT_CSSC (Apple M5), causing SIGILL with `-cpu max`. This is unverified. If it reproduces on device, the fix belongs in the TCG aarch64 backend (disable CSSC use) as a patch to the QEMU sysroot build.
 
-## Native floating point (build 37)
+## Native floating point (build 38)
 
 **The problem.** TCG turns every guest floating-point instruction into a call to a
 software routine (softfloat). In CI the guest ran integer code at about a third of
@@ -126,7 +126,7 @@ patch are the same, applies `engine/qemu/*.patch`, and checks that the result
 links the same libraries as UTM's QEMU. The patch changes GPL code and is
 GPL-2.0-or-later like the files it touches ([THIRD_PARTY](../THIRD_PARTY.md)).
 
-## Process switches (build 37)
+## Process switches (build 38)
 
 **The problem.** QEMU's soft TLB (its cache of guest address translations) has no
 ASID. Linux gives every process an ASID and writes it to TTBR1_EL1 on each

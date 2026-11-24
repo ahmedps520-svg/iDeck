@@ -10,7 +10,7 @@ source code from them; it builds, links or downloads them.
 
 | Component | License | Source |
 |---|---|---|
-| QEMU 10.0.12 (utmapp fork), modified from build 37 | GPL-2.0 (some parts LGPL/BSD) | https://github.com/utmapp/qemu (tag v10.0.12-utm) + UTM's `patches/qemu-10.0.12-utm.patch` + this repository's `engine/qemu/*.patch` (the complete corresponding source; `ios/scripts/build_qemu.sh` builds it) |
+| QEMU 10.0.12 (utmapp fork), modified from build 38 | GPL-2.0 (some parts LGPL/BSD) | https://github.com/utmapp/qemu (tag v10.0.12-utm) + UTM's `patches/qemu-10.0.12-utm.patch` + this repository's `engine/qemu/*.patch` (the complete corresponding source; `ios/scripts/build_qemu.sh` builds it) |
 | virglrenderer (utmapp fork, Venus) | MIT | https://github.com/utmapp/virglrenderer |
 | MoltenVK (utmapp fork) | Apache-2.0 | https://github.com/utmapp/MoltenVK |
 | ANGLE (from utmapp/WebKit) | BSD-3-Clause | https://github.com/utmapp/WebKit |
