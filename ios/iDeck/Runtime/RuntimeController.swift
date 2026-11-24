@@ -410,8 +410,12 @@ final class RuntimeController: ObservableObject {
         let base = manifest.isEmpty
             ? "root=/dev/vda rootfstype=ext4 rw console=ttyAMA0 loglevel=4 transparent_hugepage=never ideck.mode=gaming"
             : manifest
+        // loglevel=6: the kernel's own boot messages reach the serial console
+        // too (at 4 only warnings did), so a start that stalls before systemd
+        // still shows how far the kernel got.
         let parts = base.split(separator: " ").map(String.init)
-            .filter { $0 != "quiet" && !$0.hasPrefix("systemd.show_status=") }
+            .filter { $0 != "quiet" && !$0.hasPrefix("systemd.show_status=") && !$0.hasPrefix("loglevel=") }
+            + ["loglevel=6"]
         // mitigations=off: the VM runs only this user's Linux, and under TCG
         // every mitigation (branch-history flushes on each syscall and
         // exception) is emulated code. nowatchdog: no lockup-detector timer
