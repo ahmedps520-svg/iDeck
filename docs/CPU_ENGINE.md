@@ -7,6 +7,12 @@ started in-process. QEMU is not reimplemented. The prompt said not to write a ne
 emulator where an existing one achieves the result, and on iPadOS no hypervisor is
 available, so a binary translator is the only option.
 
+**Status on the iPad (2026-11-24): not yet working.** Both engine options are
+checked in CI on an ARM64 Linux machine only. On the M5 iPad the two starts with
+them on froze as QEMU started (build 41), so they are off by default from build
+42 and marked experimental in Settings until a device run shows why
+([TEST_RESULTS](TEST_RESULTS.md)).
+
 From build 38 the sideload edition embeds that QEMU rebuilt with iDeck's engine
 patches (`engine/qemu`):
 - the guest's floating-point instructions run on the iPad's CPU: see
@@ -69,8 +75,9 @@ both ARM64, so a guest floating-point instruction can run on the host as it is:
 - Every result is stored to the CPU state right away, so the state is exact at
   each instruction boundary whatever happens next.
 - The interpreter (TestFlight) edition keeps UTM's unpatched QEMU.
-- **Settings › Advanced › Native floating point** turns it off. iDeck turns it off by
-  itself after two starts in a row in which Linux never came up.
+- **Settings › Advanced › Native floating point** turns it on (off by default from
+  build 42). iDeck turns it off by itself after two starts in a row in which
+  Linux never came up.
 
 **How it is checked.** `bench/fpcheck.c` is one static binary:
 - It runs 5,694 encodings of the 189 patterns with NaNs, infinities, denormals,
@@ -169,8 +176,8 @@ included, and rebuilds them one page-table walk and one hash lookup at a time.
 counts is whole-system: `runtime.yml` boots the image on this QEMU with the option,
 installs Steam, starts its interface and runs the benchmark and `fpcheck`
 ([TEST_RESULTS](TEST_RESULTS.md)). **Settings › Advanced › Fast process switching**
-turns it off, and the same two-failed-starts guard as native floating point
-applies.
+turns it on (off by default from build 42), and the same two-failed-starts guard
+as native floating point applies.
 
 ## Two layers of translation for x86
 

@@ -552,6 +552,46 @@ with both patches; it was a compile check and is not published. Build 38 (run
 IPA was downloaded and checked: the embedded QEMU binary contains the property
 names `x-host-vfp`, `x-host-vfp-debug` and `x-asid-keep-global`.
 
+### Device runs, builds 38, 40 and 41 with runtime 0.1.14 (iPad17,2, iPadOS 27.2, 2026-11-24)
+
+Installed with iloader; logs pulled over USB (`dist/device-logs`, not in the repo).
+
+**Build 38 did not start Linux** (two attempts, engine options on, 1 GiB TCG cache):
+QMP answered after 3 s, then no console output, no guest agent and a flat 151 MiB
+footprint for two minutes.
+
+**Build 40** (diagnostic: boot probe, kernel messages on the console; engine options
+switched off by the guard) did not start either. The probe at 20, 45 and 90 s:
+- `gen code size 680/1072906240, TB count 1`;
+- vCPU 0 at `PC=0000000040000000` (the first guest instruction), its thread at
+  100%; the other five waiting.
+- So QEMU's translated code never ran: JIT memory, not the engine options.
+- On iPadOS 26 and later StikDebug makes the cache executable by writing a byte
+  to each 16 KiB page over the debug connection (`legacy.js`, `brk #0x69`).
+  StikDebug 3.2.2 encodes those addresses with 36 bits; 1 GiB is 65,536 pages.
+  Which of the two limits it hit is not established.
+
+**Build 41** caps the cache at 384 MiB there (the size build 31 ran with):
+- Engine options off: Linux up in 7 s (`guest agent ready after 7s`), Steam
+  running. `jit memory: executable 0x13a7c0000-0x1527c0000 (384 MiB…)`.
+- Engine options on (two starts): the app froze as QEMU started. The log ends at
+  `connecting QMP`; no line from the main thread for 80 and 150 s, no crash entry.
+  The guard switched the options off and the next start came up. Cause not known:
+  the engine options had never executed on a device before (builds 38 and 40
+  never ran translated code). Both are off by default from build 42, and a start
+  that gets no QMP answer in 12 s now logs every thread's position.
+- GPU-drawn Steam UI (experimental) on: `SIGSEGV at 0x688` on thread `vkr-ring-6`
+  in `MVKCommandBuffer::recordBindPipeline` ← `vkCmdBindPipeline` ←
+  `vn_dispatch_vkCmdBindPipeline` (a null pipeline reached MoltenVK). From build
+  42 a crash on a Venus thread switches that setting off.
+- User report: the pointer works in Steam; in Teeworlds every tap makes the
+  cursor jump and nothing is clicked. Taps were sent as absolute positions
+  (usb-tablet, 0..32767); a game in SDL relative mode turns those into deltas.
+  Build 42 adds the trackpad pointer mode (ARCHITECTURE, Channels); not yet
+  tried on the device.
+- The floating-point check in Linux has not run on the device (it needs native
+  floating point on).
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

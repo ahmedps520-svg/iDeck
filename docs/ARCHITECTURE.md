@@ -49,6 +49,16 @@ relaunched.
 | Agent control | virtio-serial `org.ideck.control` | JSON lines: status, metrics, provisioning, Steam control, self-test, benchmarks, time sync |
 | Agent input | virtio-serial `org.ideck.input` | 32-byte controller packets in, rumble packets out |
 
+**Pointer.** Linux has two SPICE pointer devices: `usb-tablet` takes positions and
+`usb-mouse` takes movement. The game view sends one or the other (`PointerMode`):
+- **Touch**: a tap is a position and a click. Right for Steam and for anything
+  with a normal pointer.
+- **Trackpad**: a drag is movement, a tap clicks where the pointer is. Needed by
+  games that take the mouse for themselves (SDL relative mode): they read
+  movement, and turn a position into a jump.
+- **Automatic** (the default) uses trackpad while the agent reports a running
+  game process, touch otherwise.
+
 The protocol definitions live in `core/include/ideck/protocol.hpp`. The app, the
 CI host (`tools/ideck_host.py`) and the agent all use them, so the two ends can
 never disagree.

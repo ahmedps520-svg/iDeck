@@ -32,7 +32,8 @@
 | Steam bootstrap failed | Valve changed CDN packages, or a network problem | Runtime › Repair Setup. Share the provision log (Runtime › Console log). |
 | Controller not detected in a game | Game expects a different pad | Enable Steam Input for the game. iDeck pads appear as Xbox 360 controllers. |
 | No rumble | Game uses no FF_RUMBLE, or vibration is off | Controls › Controller vibration |
-| Mouse-look spins or does nothing | Pointer not captured | In-game menu › Capture Mouse |
+| In a game, a tap makes the cursor jump instead of clicking | The game reads mouse movement, not positions | ⋯ menu › Pointer: trackpad (automatic picks it while a game runs, build 42): drag to move, tap to click |
+| In a game with a normal pointer, taps no longer land where you tap | Trackpad pointer is active | ⋯ menu › Pointer: touch |
 | No sound | Audio off, or PipeWire not running | Settings › Game audio. Self-test `audio` check. |
 | Clock wrong in Linux after resuming | VM paused in background | Fixed automatically by `time.sync` on return. Otherwise restart Steam. |
 | Library disk full | Growth needs more free space on the iPad | Free iPad storage. iDeck keeps 8 GB free for iPadOS and grows the library when space allows. |
