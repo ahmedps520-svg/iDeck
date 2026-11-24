@@ -47,7 +47,7 @@
   - `ideck-steam-launch` puts `/usr/lib/ideck/steam-path` first in Steam's PATH. Its `taskset` starts the web helper unpinned and passes every other call to util-linux. This keeps working after Steam updates itself.
   - CI: `Cpus_allowed_list` of the web helper is 2-3 pinned and 0-3 with the override. The sign-in window after a Steam restart took 90.7 s pinned and 79.0 s unpinned in GPU mode, and 66.6 s against 66.5 s with the software UI. The sign-in screen does little work in parallel; the library does more.
 - **GPU:** zero-copy SPICE GL scanout into an MTKView, presented at the chosen refresh rate.
-- **Refresh rate** (build 37 with runtime 0.1.13): Settings › Display offers 30, 60 and, on ProMotion displays, 120 Hz. Linux's X server paces its programs at that rate and the Metal view presents at it.
+- **Refresh rate** (build 37 with runtime 0.1.14): Settings › Display offers 30, 60 and, on ProMotion displays, 120 Hz. Linux's X server paces its programs at that rate and the Metal view presents at it.
   - Until build 36 the setting had no effect: the view always presented at 60 and Linux ran at its default mode. An earlier version of this page said the view presented at 120; the code said 60.
   - 120 Hz lets a game that can draw more than 60 frames a second show them. It does not make anything draw faster, and Steam's own interface then tries to animate at 120, which costs CPU. 60 stays the default.
 - **Storage:** raw sparse images with `discard=unmap`, `detect-zeroes=unmap`, `aio=threads`; no qcow2 overhead; APFS clones for snapshots.

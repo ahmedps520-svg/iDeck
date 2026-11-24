@@ -788,7 +788,7 @@ final class RuntimeController: ObservableObject {
             _ = try? await agent.request("steam.start", timeout: 60)
         }
         // Linux's display runs at 60 Hz unless another rate is chosen
-        // (runtime 0.1.13+; older agents ignore the rate).
+        // (runtime 0.1.14+; 0.1.13 cannot add the mode, older agents ignore the rate).
         let s = settings
         if s.refreshHz != 60 {
             let size = s.resolution.size

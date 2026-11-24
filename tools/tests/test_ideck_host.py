@@ -75,5 +75,20 @@ class TopSummaryTests(unittest.TestCase):
         self.assertIsNone(s["webhelper"])
 
 
+class SteamWindowSettled(unittest.TestCase):
+    def test_static_page_settles(self):
+        # Sign-in page through Zink: 34,504 then 34,479 bytes (run 45263787477).
+        self.assertTrue(h.steam_window_settled(34504, 34479))
+        self.assertTrue(h.steam_window_settled(38088, 38106))
+
+    def test_splash_and_blank_do_not(self):
+        # Splash over cover art, then the empty dialog, then the page.
+        self.assertFalse(h.steam_window_settled(159021, 55062))
+        self.assertFalse(h.steam_window_settled(55062, 6788))
+        self.assertFalse(h.steam_window_settled(6788, 34504))
+        self.assertFalse(h.steam_window_settled(4319, 4319))
+        self.assertFalse(h.steam_window_settled(0, 34504))
+
+
 if __name__ == "__main__":
     unittest.main()

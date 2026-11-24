@@ -1,15 +1,42 @@
 #!/bin/bash
 # set-resolution WIDTH HEIGHT [HZ] — changes the guest display mode (run as
-# root by the agent). Adds a CVT mode if the virtio-gpu output lacks it.
-# HZ (default 60) is the refresh rate X paces its clients at; virtio-gpu has
-# no real vertical blank, so any rate works. Prints the output, the mode and
-# xrandr's line for the active mode.
+# root by the agent). HZ (default 60) is the refresh rate X paces its clients
+# at. Prints the output, the mode and xrandr's line for the active mode.
+#
+# set-resolution --modeline WIDTH HEIGHT HZ — prints the modeline it would
+# add and exits (used by the tests; needs no X server).
 set -euo pipefail
+
+# A reduced-blanking style modeline, built here because Debian 13 no longer
+# ships cvt with the X server (boot test of runtime 0.1.13: "cvt: command not
+# found"). virtio-gpu has no monitor behind it, so only the totals matter: X
+# takes the refresh rate as clock / (htotal * vtotal), which is HZ here.
+modeline() {
+    local w=$1 h=$2 hz=$3
+    local hfp=48 hsync=32 hbp=80 vfp=3 vsync=5 vbp=22
+    local htotal=$((w + hfp + hsync + hbp)) vtotal=$((h + vfp + vsync + vbp))
+    local khz=$((htotal * vtotal * hz / 1000))
+    printf '%d.%03d %d %d %d %d %d %d %d %d +hsync -vsync\n' \
+        $((khz / 1000)) $((khz % 1000)) \
+        "$w" $((w + hfp)) $((w + hfp + hsync)) "$htotal" \
+        "$h" $((h + vfp)) $((h + vfp + vsync)) "$vtotal"
+}
+
+PRINT_ONLY=0
+if [ "${1:-}" = "--modeline" ]; then
+    PRINT_ONLY=1
+    shift
+fi
 W="${1:?width}"
 H="${2:?height}"
 HZ="${3:-60}"
 [[ "$W" =~ ^[0-9]+$ && "$H" =~ ^[0-9]+$ ]] || { echo "bad size" >&2; exit 2; }
+[ "$W" -ge 320 ] && [ "$W" -le 7680 ] && [ "$H" -ge 200 ] && [ "$H" -le 4320 ] || { echo "bad size" >&2; exit 2; }
 [[ "$HZ" =~ ^[0-9]+$ ]] && [ "$HZ" -ge 24 ] && [ "$HZ" -le 240 ] || { echo "bad refresh rate" >&2; exit 2; }
+if [ "$PRINT_ONLY" = 1 ]; then
+    modeline "$W" "$H" "$HZ"
+    exit 0
+fi
 
 run_x() { runuser -u deck -- env DISPLAY=:0 "$@"; }
 
@@ -20,12 +47,10 @@ OUT=$(run_x xrandr --query | awk '/ connected/{print $1; exit}')
 MODE="${W}x${H}_${HZ}"
 MODES=$(run_x xrandr --query)
 if ! grep -qE "^\s+${MODE}\s" <<<"$MODES"; then
-    MODELINE=$(cvt "$W" "$H" "$HZ" | sed -n 's/^Modeline "[^"]*" //p')
-    [ -n "$MODELINE" ] || { echo "cvt gave no modeline for ${W}x${H} at ${HZ} Hz" >&2; exit 1; }
     # newmode fails harmlessly when the mode is already defined but not yet
     # added to this output.
-    # shellcheck disable=SC2086  # the modeline is a list of numbers and flags
-    run_x xrandr --newmode "$MODE" $MODELINE || true
+    # shellcheck disable=SC2046  # the modeline is a list of numbers and flags
+    run_x xrandr --newmode "$MODE" $(modeline "$W" "$H" "$HZ") || true
     run_x xrandr --addmode "$OUT" "$MODE"
 fi
 run_x xrandr --output "$OUT" --mode "$MODE"

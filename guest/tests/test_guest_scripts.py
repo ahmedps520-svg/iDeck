@@ -119,5 +119,39 @@ class ManifestToolTests(unittest.TestCase):
         return bytes(b)
 
 
+class SetResolutionModeline(unittest.TestCase):
+    """set-resolution builds its own modeline (Debian 13 has no cvt)."""
+
+    def modeline(self, *args):
+        import shutil
+        import subprocess
+        bash = shutil.which("bash")
+        if os.name == "nt" or not bash:
+            self.skipTest("needs bash")
+        script = ROOT / "guest" / "rootfs" / "usr" / "lib" / "ideck" / "set-resolution"
+        return subprocess.run([bash, str(script), "--modeline", *map(str, args)],
+                              capture_output=True, text=True)
+
+    def test_refresh_rate_is_exact(self):
+        for w, h, hz in ((1280, 720, 120), (1280, 720, 60), (1920, 1080, 120), (960, 540, 30)):
+            r = self.modeline(w, h, hz)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            f = r.stdout.split()
+            clock = float(f[0])
+            hdisp, hss, hse, htotal, vdisp, vss, vse, vtotal = map(int, f[1:9])
+            self.assertEqual((hdisp, vdisp), (w, h))
+            self.assertTrue(hdisp < hss < hse < htotal and vdisp < vss < vse < vtotal, r.stdout)
+            self.assertAlmostEqual(clock * 1e6 / (htotal * vtotal), hz, delta=0.01)
+
+    def test_1280x720_at_120(self):
+        r = self.modeline(1280, 720, 120)
+        self.assertEqual(r.stdout.strip(), "129.600 1280 1328 1360 1440 720 723 728 750 +hsync -vsync")
+
+    def test_rejects_bad_arguments(self):
+        self.assertEqual(self.modeline(1280, 720, 500).returncode, 2)
+        self.assertEqual(self.modeline("12x", 720, 60).returncode, 2)
+        self.assertEqual(self.modeline(100000, 720, 60).returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

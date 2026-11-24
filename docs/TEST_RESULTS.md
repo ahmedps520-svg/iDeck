@@ -452,6 +452,80 @@ Runtime 0.1.10 candidate (commit 94cc92b), `runtime.yml` boot tests with Steam's
   - CPU in the following 60 s was 20.6%; a restart back to software drew the window in 72.6 s.
 - **Published:** runtime 0.1.11 (run 45209862503, commit 14e21d0), runtime 0.1.12 (Zink kopper fix, commit c805838), and app build 34 (run 45200443080, in the SideStore/AltStore feed).
 
+### Engine patches: native floating point and process switches (CI, 2026-11-23)
+
+iDeck's QEMU from this point is UTM's QEMU 10.0.12 plus `engine/qemu/*.patch`
+([CPU_ENGINE](CPU_ENGINE.md)). Nothing in this section ran on an iPad.
+
+**Instruction check and benchmarks** (`engine.yml`, ARM64 runner, Neoverse N2; the
+same static binaries on the runner's CPU and in guests with 4 vCPUs):
+
+| Run | What | Result |
+|---|---|---|
+| 45240386488 | first build of the patch; 186 patterns | registers equal to hardware for all; FPSR differed on 5 (a stray inexact flag) |
+| 45242298976 | per-run dumps of those 5 | the flag appears only on the first run of a newly translated block |
+| 45243645133 | translator's own FP flags kept out of the guest's | registers and flags equal for all 186 |
+| 45245742398 | slot cache (values stay in host registers); 189 patterns, 90,000 mixed-sequence runs | all equal; fp_scalar 14.8 to 35.7 Mpairs/s, fp_convert 35.7 to 115.1, fp_vector 59.1 to 429.3, fp_single 228 to 586 |
+| 45251783425 | patch 0002, TLB entries of the kernel kept | all equal; ctx_switch 89.9 to 47.3 us |
+| 45253235590 | 0002 also keeps the kernel's jump cache entries | all equal; ctx_switch 99.1 to 28.7 us, ctx_switch_64p 122.0 to 48.8 us |
+
+- The check found a real difference in another emulator: Ubuntu's QEMU 8.2, which
+  the boot tests used until now, computes `FJCVTZS` differently from hardware
+  (`bench-max`, run 45254513225). QEMU 10.0.12 does not.
+- A benchmark bug surfaced the same way: `ctx_switch` hung on the runner's CPU
+  (run 45249819016) because the child kept its own copy of a pipe end.
+
+**iOS build of the patched QEMU** (`ios.yml` on the `engine-host-vfp` branch):
+- Run 45242404771: QEMU compiled, installed and passed UTM's framework fix-up; the
+  script's own check then failed on a `grep -q` under `pipefail`.
+- Run 45246869561: passed. QEMU (aarch64-softmmu only) builds in 5 minutes against
+  UTM's prebuilt sysroot with UTM's script, compiler and flags; it links the same
+  set of libraries as UTM's QEMU (the script compares), with VirGL 1.3.0, SPICE,
+  slirp, libusb and usbredir found. PNG support is off in this build (pkg-config
+  did not find zlib for libpng); the app does not use it. The IPA packaged.
+
+**Whole image on the patched QEMU** (`runtime.yml`, 4 vCPUs, 4 GiB, `max` CPU
+model, software-drawn Steam UI as on the iPad):
+
+| | 45255288785: options off (control) | 45246861541: native FP | 45254513225: native FP + kept TLB |
+|---|---:|---:|---:|
+| Boot to agent | 21.9 s | 22.8 s | 22.4 s |
+| fpcheck in the image, against the build host's CPU | all 189 equal | all 189 equal | all 189 equal |
+| Steam installed, client started, sign-in window drawn | yes | yes | yes |
+| Sign-in window after a Steam restart | 66.6 s | 60.5 s | 60.5 s |
+| Guest CPU with the sign-in window shown / hidden | 10.5% / 8.1% | 10.5% / 7.2% | 8.4% / 6.5% |
+| fp_scalar, fp_vector, fp_convert | 13.5, 55.4, 32.3 | 33.5, 398.0, 109.8 | 33.6, 353.0, 88.2 |
+| ctx_switch, ctx_switch_64p | 131.0, 157.9 us | (not in this image) | 52.3, 73.6 us |
+| Steam through Zink on lavapipe (CI-only GPU-UI check) | sign-in page at 120.8 s | splash at 78.6 s, page later (see below) | splash at 73.0 s, page later |
+
+- Benchmark boots without Steam, same run 45254513225: helpers / native FP /
+  native FP + kept TLB: fp_scalar 13.8 / 33.9 / 32.3, fp_vector 55.0 / 353.9 /
+  375.5, fp_convert 35.3 / 104.3 / 111.2, ctx_switch 109.6 / 106.4 / 39.3 us.
+- The sign-in screen itself gains little: starting Steam is mostly translating new
+  code, which these patches do not change.
+- **The Zink check looked like a defect and was not.** With the options on, the
+  screenshot 20 s after the first drawn frame showed an empty dialog, and the
+  control with the options off showed the sign-in page.
+  - Eleven diagnostic runs (each option alone, the slot cache off, and eight
+    with a different eighth of the patterns left to QEMU; runs 45263772871 to
+    45264517426) did not line up with any option: native floating point alone
+    drew the page, and three unrelated variants showed the empty dialog. Every
+    one of those drew the page 18 to 24 s later.
+  - The kept frames explain it. Steam first shows a splash, "Waiting for
+    network…" over fading cover art, then an empty dialog, then the sign-in page
+    at about 118 s. A faster guest reaches the splash at 72 to 79 s, and the test
+    took that for the window; the slower control never caught it. All three
+    frames are drawn correctly through Zink with the options on.
+  - The test now waits until two frames 5 s apart are both drawn and the same
+    size (`steam_window_settled`), and keeps the first frame and Steam's journal.
+  - The journal of those runs has no web-helper crash or restart.
+- `display.set` with a refresh rate failed in these runs. The diagnostic runs
+  report why: `cvt: command not found` (Debian 13 no longer ships it with the X
+  server). The plain mode also turned out to run at 75 Hz, QEMU's EDID default,
+  not 60. Runtime 0.1.13 was published from run 45254513225 with that fault:
+  asking for another rate does nothing there. From runtime 0.1.14
+  `set-resolution` builds its own modeline and every rate has its own mode.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |

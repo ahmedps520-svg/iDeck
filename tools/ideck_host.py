@@ -185,6 +185,18 @@ JIT_KEYS = {
 }
 
 
+def steam_window_settled(previous_png_bytes: int, png_bytes: int) -> bool:
+    """Two consecutive screenshots show the same drawn window.
+
+    A drawn 1280x720 sign-in window compresses to 34-38 KB; a blank screen to
+    about 4 KB and the empty dialog to about 7 KB. The splash with its fading
+    cover art is drawn too, but changes size from frame to frame.
+    """
+    if previous_png_bytes <= 25000 or png_bytes <= 25000:
+        return False
+    return abs(png_bytes - previous_png_bytes) <= 0.03 * previous_png_bytes
+
+
 def parse_jit_info(text: str) -> dict:
     """Numbers from QEMU's `info jit` (QMP x-query-jit): how full the TCG
     code buffer is, how many translation blocks exist, and how often the
@@ -545,15 +557,28 @@ def main() -> int:
                         break
                     agent.wait_event("__none__", 3)
                 res["stopped_s"] = round(blank_at - t_start, 1) if blank_at else None
+                # Steam first shows a splash ("Waiting for network..." over fading
+                # cover art), then an empty dialog, then the sign-in page. A fast
+                # run catches the splash as a large frame (runs 45263787477 and
+                # 45264491797), so the window counts as up when two frames 5 s
+                # apart are both drawn and about the same: the page is static,
+                # the splash is not.
                 window_at = None
+                first_at = None
+                prev = (0, 0.0)
                 while blank_at and time.time() - t_start < 900:
-                    if screenshot(f"screen-ab-{label}") > 25000:
-                        window_at = time.time()
-                        # The next screenshot replaces this one: keep the first drawn frame.
+                    size = screenshot(f"screen-ab-{label}")
+                    now = time.time()
+                    if size > 25000 and first_at is None:
+                        first_at = now
                         shutil.copyfile(a.report / f"screen-ab-{label}.png",
                                         a.report / f"screen-ab-{label}-first.png")
+                    if steam_window_settled(prev[0], size):
+                        window_at = prev[1]
                         break
+                    prev = (size, now)
                     agent.wait_event("__none__", 5)
+                res["first_frame_s"] = round(first_at - t_start, 1) if first_at else None
                 res["window_s"] = round(window_at - t_start, 1) if window_at else None
                 if window_at:
                     agent.wait_event("__none__", 20)
