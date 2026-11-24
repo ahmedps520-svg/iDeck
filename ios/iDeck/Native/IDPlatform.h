@@ -25,6 +25,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// any below user-interactive with a QoS override, so iOS prefers the
 /// performance cores for them. Returns a line for the log.
 + (NSString *)raiseVCPUThreadQoS;
+/// Each thread that used CPU time (and every vCPU thread): name, run state,
+/// current CPU use and total CPU seconds. Shows whether QEMU's vCPU threads
+/// are executing or blocked when Linux shows nothing.
++ (NSString *)threadActivitySummary;
 @property (class, nonatomic, readonly) uint64_t physicalMemory;
 /// e.g. "iPad17,1"
 @property (class, nonatomic, readonly) NSString *modelIdentifier;

@@ -198,5 +198,40 @@ check(!fpBad.ok && fpBad.text == "native: 2 of 189 instruction patterns differ f
 let fpNone = EngineGuard.checkSummary(fpReply(#"{"reference": false, "patterns": 0, "match": false}"#), nativeFP: true)
 check(!fpNone.ok && fpNone.text.contains("no hardware reference"), "fpcheck summary without a reference")
 
+// HMP output as QEMU 10 prints it (accel/tcg/monitor.c, target/arm/cpu.c).
+let jitText = """
+Translation buffer state:
+gen code size       27486532/1073736704
+TB count            61290
+TB avg target size  17 max=1024 bytes
+TB avg host size    448 bytes (expansion ratio: 25.7)
+
+Statistics:
+TB flush count      0
+TB invalidate count 1923
+TLB full flushes    12
+TLB partial flushes 3301
+"""
+check(BootProbeParsing.jitSummary(jitText)
+      == "gen code size 27486532/1073736704, TB count 61290, TB flush count 0, TB invalidate count 1923, TLB full flushes 12",
+      "info jit summary: \(BootProbeParsing.jitSummary(jitText))")
+check(BootProbeParsing.jitSummary("x-query-jit: not supported").hasPrefix("no counters"), "info jit summary without counters")
+let regsText = """
+
+CPU#0
+ PC=ffff800080e1c2a4 X00=0000000000000000 X01=0000000000000001 X02=0000000000000000
+X03=0000000000000000 X04=0000000000000000 X05=0000000000000000
+ SP=ffff800082e03e80
+PSTATE=600003c5 -ZC- EL1h     FPCR=00000000 FPSR=00000000
+
+CPU#1
+ PC=0000000040000000 X00=0000000000000000 X01=0000000000000000 X02=0000000000000000
+ SP=0000000000000000
+PSTATE=400003c5 -Z-- NS EL1h     FPCR=00000000 FPSR=00000000
+"""
+check(BootProbeParsing.vcpuSummary(regsText) == "0 PC=ffff800080e1c2a4 EL1h, 1 PC=0000000040000000 EL1h",
+      "vCPU summary: \(BootProbeParsing.vcpuSummary(regsText))")
+check(BootProbeParsing.vcpuSummary("").hasPrefix("no registers"), "vCPU summary without registers")
+
 print(failures == 0 ? "all checks passed" : "\(failures) check(s) failed")
 exit(failures == 0 ? 0 : 1)

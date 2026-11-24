@@ -512,6 +512,8 @@ final class RuntimeController: ObservableObject {
             argv.insert(contentsOf: ["-L", qemuData.path], at: 1)
         }
 
+        DiagLog.write("qemu: " + argv.dropFirst().joined(separator: " "))
+
         phase = .starting("Starting Linux")
         guard let fw = Bundle.main.privateFrameworksURL?.appendingPathComponent("qemu-aarch64-softmmu.framework"),
               FileManager.default.fileExists(atPath: fw.path) else {
@@ -534,6 +536,31 @@ final class RuntimeController: ObservableObject {
             DiagLog.write("gpu shm: \(RuntimeController.sharedMemoryStats)")
         }
         phase = .booting("Booting Linux")
+        Task { await probeBootStall() }
+    }
+
+    /// While Linux has not come up, records at 20, 45 and 90 s what QEMU's
+    /// vCPUs are doing: the run state, how much code TCG has translated
+    /// (HMP "info jit"), each vCPU's PC and exception level, and which host
+    /// threads use CPU time. Three samples show whether anything moves.
+    private func probeBootStall() async {
+        let started = Date()
+        for at in [20.0, 45.0, 90.0] {
+            let wait = at - Date().timeIntervalSince(started)
+            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1e9)) }
+            guard case .booting = phase, let qmp else { return }
+            let console = DiagLog.tail(Paths.consoleLog, lines: 1).isEmpty ? "no console output" : "console has output"
+            var parts = ["boot probe at \(Int(at)) s: \(console)"]
+            if let status = try? await qmp.status() { parts.append("status \(status)") }
+            if let jit = try? await qmp.execute("human-monitor-command", ["command-line": "info jit"]) as? String {
+                parts.append("jit: " + BootProbeParsing.jitSummary(jit))
+            }
+            if let regs = try? await qmp.execute("human-monitor-command", ["command-line": "info registers -a"]) as? String {
+                parts.append("vCPUs: " + BootProbeParsing.vcpuSummary(regs))
+            }
+            parts.append("threads: " + IDPlatform.threadActivitySummary())
+            DiagLog.write(parts.joined(separator: "; "))
+        }
     }
 
     private func qemuEnvironment() -> [String: String] {

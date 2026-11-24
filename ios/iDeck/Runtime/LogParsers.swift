@@ -100,3 +100,39 @@ struct SteamUpdateState: Equatable {
         }
     }
 }
+
+/// QEMU monitor output recorded when Linux shows nothing for a while after
+/// QEMU started (RuntimeController.probeBootStall).
+enum BootProbeParsing {
+    /// The counters of HMP "info jit" that show whether TCG translates code,
+    /// e.g. "gen code size 1234/1073736704, TB count 45, TB flush count 0".
+    static func jitSummary(_ text: String) -> String {
+        let keys = ["gen code size", "TB count", "TB flush count", "TB invalidate count", "TLB full flushes"]
+        var out: [String] = []
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.split(separator: " ").joined(separator: " ")
+            if keys.contains(where: { line.hasPrefix($0 + " ") }) { out.append(line) }
+        }
+        return out.isEmpty ? "no counters (\(text.prefix(80)))" : out.joined(separator: ", ")
+    }
+
+    /// Program counter and exception level of each vCPU from HMP
+    /// "info registers -a" (target/arm aarch64_cpu_dump_state), e.g.
+    /// "0 PC=ffff800080e1c2a4 EL1h, 1 PC=0000000040000000 EL1h".
+    static func vcpuSummary(_ text: String) -> String {
+        var out: [String] = []
+        var rest = Substring(text)
+        while let pc = rest.range(of: "PC=") {
+            let hex = rest[pc.upperBound...].prefix { $0.isHexDigit }
+            rest = rest[pc.upperBound...]
+            var el = "EL?"
+            let next = rest.range(of: "PC=")?.lowerBound ?? rest.endIndex
+            if let ps = rest[..<next].range(of: "PSTATE=") {
+                let words = rest[ps.upperBound..<next].split(whereSeparator: { $0 == " " || $0.isNewline })
+                if let w = words.prefix(4).first(where: { $0.hasPrefix("EL") }) { el = String(w) }
+            }
+            out.append("\(out.count) PC=\(hex) \(el)")
+        }
+        return out.isEmpty ? "no registers (\(text.prefix(80)))" : out.joined(separator: ", ")
+    }
+}

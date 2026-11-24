@@ -108,6 +108,39 @@ extern int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
                                       failed ? [NSString stringWithFormat:@", failed: %d", failed] : @""];
 }
 
++ (NSString *)threadActivitySummary {
+    thread_act_array_t threads = NULL;
+    mach_msg_type_number_t count = 0;
+    if (task_threads(mach_task_self(), &threads, &count) != KERN_SUCCESS) return @"threads: unavailable";
+    static const char *states[] = {"?", "running", "stopped", "waiting", "uninterruptible", "halted"};
+    NSMutableArray<NSString *> *shown = [NSMutableArray array];
+    int quiet = 0;
+    for (mach_msg_type_number_t i = 0; i < count; i++) {
+        thread_extended_info_data_t info;
+        mach_msg_type_number_t n = THREAD_EXTENDED_INFO_COUNT;
+        if (thread_info(threads[i], THREAD_EXTENDED_INFO, (thread_info_t)&info, &n) == KERN_SUCCESS) {
+            info.pth_name[sizeof(info.pth_name) - 1] = 0;
+            NSString *name = [NSString stringWithUTF8String:info.pth_name] ?: @"";
+            if (name.length == 0) name = [NSString stringWithFormat:@"#%u", i];
+            // pth_user_time/pth_system_time are nanoseconds; pth_cpu_usage is
+            // scaled by TH_USAGE_SCALE (1000 = one core).
+            double seconds = (double)(info.pth_user_time + info.pth_system_time) / 1e9;
+            int percent = info.pth_cpu_usage * 100 / TH_USAGE_SCALE;
+            int state = info.pth_run_state;
+            if ([name hasSuffix:@"/TCG"] || seconds >= 0.5 || percent >= 5) {
+                [shown addObject:[NSString stringWithFormat:@"%@ %s %d%% %.1fs", name,
+                                  states[(state >= 1 && state <= 5) ? state : 0], percent, seconds]];
+            } else {
+                quiet++;
+            }
+        }
+        mach_port_deallocate(mach_task_self(), threads[i]);
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)threads, count * sizeof(thread_act_t));
+    return [NSString stringWithFormat:@"%@%@", [shown componentsJoinedByString:@", "],
+                                      quiet ? [NSString stringWithFormat:@" (+%d quiet)", quiet] : @""];
+}
+
 + (uint64_t)physicalMemory {
     return NSProcessInfo.processInfo.physicalMemory;
 }
