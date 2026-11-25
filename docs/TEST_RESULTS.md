@@ -633,6 +633,13 @@ engine options.**
   during the boot, because iOS suspends it then.
 - From build 46 a larger cache waits until the engine options have worked or
   are off: one unknown per start.
+- CI for build 46 (commit 004b543): the app built and packaged (`ios.yml` run
+  45637624632); in `ci.yml` run 45637622679 the Swift checks for the engine
+  guard, the start counter and the cache choice pass on macOS, as do the core
+  and agent tests on Linux, Windows and macOS. The AppleClang CMake job of
+  that run was still waiting for a runner when this was written.
+- The IPA of build 46 was checked: version 0.1.46, the patched QEMU with both
+  engine options, and the new log lines in the app binary.
 
 ### iOS app builds (`ios.yml`)
 
