@@ -576,10 +576,9 @@ switched off by the guard) did not start either. The probe at 20, 45 and 90 s:
   running. `jit memory: executable 0x13a7c0000-0x1527c0000 (384 MiB…)`.
 - Engine options on (two starts): the app froze as QEMU started. The log ends at
   `connecting QMP`; no line from the main thread for 80 and 150 s, no crash entry.
-  The guard switched the options off and the next start came up. Cause not known:
-  the engine options had never executed on a device before (builds 38 and 40
-  never ran translated code). Both are off by default from build 42, and a start
-  that gets no QMP answer in 12 s now logs every thread's position.
+  The guard switched the options off and the next start came up. Build 42 has
+  them off by default. **Corrected on 2026-11-25: the options were not the
+  cause**, see the next section.
 - GPU-drawn Steam UI (experimental) on: `SIGSEGV at 0x688` on thread `vkr-ring-6`
   in `MVKCommandBuffer::recordBindPipeline` ← `vkCmdBindPipeline` ←
   `vn_dispatch_vkCmdBindPipeline` (a null pipeline reached MoltenVK). From build
@@ -591,6 +590,44 @@ switched off by the guard) did not start either. The probe at 20, 45 and 90 s:
   tried on the device.
 - The floating-point check in Linux has not run on the device (it needs native
   floating point on).
+
+### The frozen starts of build 41, read again (2026-11-25)
+
+Build 42 on the device: the pointer works in Teeworlds (user report; trackpad
+mode). Steam's own interface is reported as very slow, the game as smooth.
+
+**The two frozen starts were stopped in JIT preparation, before QEMU read the
+engine options.**
+- iDeck was stopped as a whole. A running iDeck logs memory every 10 s (build
+  40 did, through a boot that never came up) and reports a missing QMP answer
+  after 90 s. Neither appears in 80 and 150 s, and the last line comes within
+  8 ms of starting QEMU's thread.
+- Only a debugger can hold a process like that without a crash entry, and
+  StikDebug is attached until it has handled QEMU's `brk #0x69`.
+- QEMU reaches that `brk` in `configure_accelerators()` and parses `-cpu`
+  after it (`system/vl.c` of `v10.0.12-utm`: lines 3795 and 3837). So the
+  options had not been read when the starts stopped.
+- While the debugger is attached any stop is silent: `legacy.js` continues
+  past every stop that is not `brk #0x69` without passing the signal on, so a
+  crash there would also look like a freeze. Which of the two it was (StikDebug
+  not finishing the page writes, or another stop) is not known. The starts
+  before and after these two, with the same 384 MiB cache, were not stopped.
+- What followed from the wrong reading: the guard counted both starts against
+  the options, and build 42 switched them off.
+
+**Builds 43 and 44** (not yet run on the device; 44 adds the last point and is
+the one to install):
+- A start counts against the engine options only once QEMU runs with them.
+  They are on again, with one failed start as the limit until they have worked.
+- The next launch after such a stop says that it happened in JIT preparation
+  (`previous session: … stopped in JIT preparation`).
+- The TCG cache size is chosen from where QEMU would map it
+  ([PERFORMANCE](PERFORMANCE.md#tcg-cache-flushes-measured-in-ci)), and the log
+  records the address ranges, what the debugger wrote into the cache, and the
+  flush count after 3, 10, 30 and 60 minutes.
+- A crash on one of QEMU's vCPU threads switches the engine options off at the
+  next launch. The guard above only sees starts in which Linux never came up;
+  an instruction this processor lacks would crash later, at every start.
 
 ### iOS app builds (`ios.yml`)
 

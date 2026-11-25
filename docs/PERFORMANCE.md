@@ -31,8 +31,8 @@
 ## Optimisations implemented
 
 - **Memory:** jetsam-aware guest sizing; a bounded TCG cache; balloon with free-page reporting; on pressure the guest drops caches, the balloon inflates, disks sync and UI caches are released. Journald runs in RAM; `vm.swappiness=0`.
-- **Native floating point** (build 38; off by default from build 42, not yet run on a device): the embedded QEMU carries iDeck's engine patch. Linux's floating-point and vector math instructions run on the iPad's CPU instead of in QEMU's software routines. In CI, floating-point loops ran 2.4–7.3× faster and all 189 instruction patterns gave the same bits as real hardware. See [CPU_ENGINE](CPU_ENGINE.md#native-floating-point-build-38).
-- **Fast process switching** (build 38; off by default from build 42, not yet run on a device): QEMU keeps the kernel's address translations when Linux switches between programs instead of rebuilding all of them. In CI a switch went from 99 µs to 29 µs. See [CPU_ENGINE](CPU_ENGINE.md#process-switches-build-38).
+- **Native floating point** (build 38; on again from build 43 behind a guard, not yet run on a device): the embedded QEMU carries iDeck's engine patch. Linux's floating-point and vector math instructions run on the iPad's CPU instead of in QEMU's software routines. In CI, floating-point loops ran 2.4–7.3× faster and all 189 instruction patterns gave the same bits as real hardware. See [CPU_ENGINE](CPU_ENGINE.md#native-floating-point-build-38).
+- **Fast process switching** (build 38; on again from build 43 behind a guard, not yet run on a device): QEMU keeps the kernel's address translations when Linux switches between programs instead of rebuilding all of them. In CI a switch went from 99 µs to 29 µs. See [CPU_ENGINE](CPU_ENGINE.md#process-switches-build-38).
 - **CPU:** MTTCG; the `neoverse-n1` model avoids PAuth/SVE emulation costs (V1, N2 and A710 start with `pauth=off,sve=off` since build 28); performance profiles set 2, 4 or 6 vCPUs; the agent's input path runs on its own thread.
 - **Kernel:** `mitigations=off nowatchdog kpti=0 transparent_hugepage=never`. `kpti=0` (build 28 / runtime 0.1.9) made system calls 7× faster in CI; see below.
 - **Steam's UI only while it is on screen** (build 29 / runtime 0.1.9; in the guest agent from runtime 0.1.11, which halved its own overhead, see [STEAM](STEAM.md#steams-ui-only-while-it-is-on-screen)):
@@ -153,6 +153,13 @@ QEMU translates guest code into a fixed buffer (`-accel tcg,tb-size=`). When the
 **Why not 2 GiB.** The cap is 1024 MiB because split-wx maps the buffer twice, and iDeck runs without the extended-virtual-addressing entitlement. The boot log now records the address space (`address space with Linux running:`), so 2 GiB can be decided on device data.
 
 **On the iPad the cache is 384 MiB (build 41).** With 1 GiB, builds 38 and 40 never ran translated code on iPadOS 27.2: StikDebug has to make the whole cache executable page by page, and that did not work at 1 GiB ([TEST_RESULTS](TEST_RESULTS.md), device runs of 2026-11-24). 384 MiB is the size that ran. The flush counts above therefore apply to the iPad again until a larger size is shown to work there; the log line `jit memory: executable …` records where the cache lands.
+
+**Build 43 picks the size from a measurement.** One cause is known that stops a large cache: StikDebug 3.2.2 writes each page address with nine hex digits (`JSDebugSupport.swift`, `fillAddress`), so a cache mapped at 64 GiB or above is never prepared. Whether that is what stopped 1 GiB is not known, because builds 38 and 40 did not log where the cache was. Before QEMU starts, iDeck now maps and unmaps 1 GiB, 768 and 512 MiB the way QEMU does and looks at the addresses (`JITCachePlan`):
+- 1 GiB would be mapped at 64 GiB or above: the address limit explains the failure, and the largest size that stays below is used.
+- 1 GiB would be mapped below 64 GiB: something else stopped it, and the cache stays at 384 MiB.
+- A larger size that does not run is recorded, and the next start goes back to 384 MiB.
+
+The log has the evidence either way: `jit cache: up to …`, `address ranges before QEMU starts: …`, `jit memory: N of M pages carry the debugger's mark`, and `jit after 3 min: … TB flush count N` (also after 10, 30 and 60 minutes), which is the first count of flushes on the device.
 
 ## CPU model `max` and glibc `memcpy` (CI, 2026-11-23)
 

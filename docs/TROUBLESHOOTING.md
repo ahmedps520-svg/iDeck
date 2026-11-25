@@ -6,6 +6,8 @@
 | "JIT was enabled, but StikDebug detached right away" (Diagnostics: CS_DEBUGGED yes, debugger attached no) | StikDebug ran no script for iDeck (it auto-assigns scripts by app name and does not know iDeck) | Use the in-app button (it requests legacy.js), or in StikDebug long-press iDeck › Assign Script › legacy.js. Never assign universal.js. |
 | QEMU log: `Property 'virtio-gpu-gl-pci.refresh_rate' not found` | Builds 1–9 passed an option this QEMU lacks | Install build 10 or later |
 | StikDebug cannot find iDeck | IPA not development-signed | Re-sign with Sideloadly, AltStore or SideStore (they keep `get-task-allow`) |
+| The screen stays on Connecting to Linux and iDeck does not react | StikDebug held iDeck while preparing JIT memory and did not let it continue. No setting is involved: QEMU reads its settings after that step | Close iDeck from the app switcher and start again; the next launch says so. If it happens twice in a row, close StikDebug as well |
+| "Linux did not come up with the faster CPU engine" | First start with native floating point and fast process switching on this build | Close iDeck and open it again: the next start runs without them |
 | "Restart iDeck" after Linux stopped | QEMU starts once per app launch | Close iDeck from the app switcher, enable JIT, then open it again |
 | Setup: "No runtime source is configured" | IPA built without a manifest URL | Settings › Advanced › Runtime manifest URL, e.g. `https://github.com/<you>/<repo>/releases/download/runtime-latest/manifest.json` |
 | Setup stops at verify | Corrupt or incomplete download | Retry. The bad file is deleted and downloaded again. |

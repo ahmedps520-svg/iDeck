@@ -37,6 +37,8 @@ in StikDebug's source (StikDebug/StikDebug @ 0393dca):
 - legacy.js attaches, continues past every stop until the first `brk #0x69`, writes to each 16 KiB page of the RX range through debugserver (which makes it usable for JIT under TXM), then detaches. It services one region per attach, and QEMU allocates one code buffer per process.
 - StikDebug chooses scripts per app: first a script the user assigned (long-press › Assign Script), else an automatic match on the **app name** (e.g. "UTM" → legacy.js). For an unknown app it attaches and detaches immediately. That sets `CS_DEBUGGED` but leaves `P_TRACED` false, so QEMU skips the `brk` and JIT memory is never prepared. This is what the first device run showed.
 - `universal.js` must **not** be used: it rejects `brk #0x69` and never prepares the region.
+- Until that `brk` is handled the debugger is attached, and every stop is silent: legacy.js continues past any other stop without passing the signal on, so a crash before the `brk`, or page writes that never finish, leave iDeck frozen with nothing in its logs. QEMU reaches the `brk` before it reads its CPU options (`system/vl.c`). Two starts of build 41 froze this way ([TEST_RESULTS](TEST_RESULTS.md)).
+- StikDebug 3.2.2 writes each page address with nine hex digits (`fillAddress`), so it cannot prepare a cache mapped at 64 GiB or above. iDeck measures where the cache would be mapped before it picks a size ([PERFORMANCE](PERFORMANCE.md)).
 
 iDeck therefore:
 

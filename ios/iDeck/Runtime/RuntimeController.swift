@@ -171,6 +171,27 @@ final class RuntimeController: ObservableObject {
                         + "so GPU-drawn Steam UI was switched off. It is experimental; you can switch it back on in Settings."
                 }
             }
+            // QEMU's vCPU threads ("CPU n/TCG") run Linux's code, and with
+            // native floating point they run Linux's own instructions on
+            // this processor. A crash there would repeat at every start:
+            // Linux is up long before a program reaches the instruction, and
+            // EngineGuard only counts starts in which Linux never came up.
+            if previous.signal != nil, previous.crashThread?.hasPrefix("CPU ") == true {
+                var changed = Settings.load()
+                if changed.nativeFloatingPoint || changed.fastProcessSwitch {
+                    changed.nativeFloatingPoint = false
+                    changed.fastProcessSwitch = false
+                    changed.save()
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
+                    }
+                    EngineGuard.clear(Paths.engineProven)
+                    DiagLog.write("engine: options switched off after a crash on \(previous.crashThread ?? "?")")
+                    previousSessionNotice = "iDeck crashed in the CPU emulator, so Native floating point and Fast process switching "
+                        + "were switched off. You can switch them back on in Settings \u{203A} Advanced. "
+                        + "Share the logs from Diagnostics so it can be fixed."
+                }
+            }
         }
         refreshInstalledState()
         memory.apply = { [weak self] actions in await self?.applyPressure(actions) }

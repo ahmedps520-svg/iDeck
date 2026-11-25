@@ -74,7 +74,7 @@ this: [DISTRIBUTION](docs/DISTRIBUTION.md).
 
 ## Honest expectations
 
-- The CPU is emulated. TCG translates ARM64 to ARM64, and x86 games add FEX translation inside the guest on top of that. Running floating-point and vector math directly on the iPad's CPU is built in but experimental and off by default: it passes in CI and has not yet started on a device ([CPU_ENGINE](docs/CPU_ENGINE.md)). Expect light 2D and older 3D games to be the realistic target. Demanding games will not reach 30 FPS. [PERFORMANCE](docs/PERFORMANCE.md) explains how performance is measured; no figures from a real iPad exist yet.
+- The CPU is emulated. TCG translates ARM64 to ARM64, and x86 games add FEX translation inside the guest on top of that. Running floating-point and vector math directly on the iPad's CPU is built in and tried from build 43: it passes in CI, has not yet run on a device, and switches itself off if Linux does not come up with it ([CPU_ENGINE](docs/CPU_ENGINE.md)). Expect light 2D and older 3D games to be the realistic target. Demanding games will not reach 30 FPS. [PERFORMANCE](docs/PERFORMANCE.md) explains how performance is measured; no figures from a real iPad exist yet.
 - Valve ships the ARM64 Linux client publicly on its CDN, but does not support it on general ARM Linux. It may change without notice ([STEAM](docs/STEAM.md)).
 - DXVK 3.x needs Vulkan 1.4 features that Vulkan-on-Metal does not fully provide yet. Some D3D games will not render ([GRAPHICS](docs/GRAPHICS.md)).
 - Kernel-level anti-cheat games will not run.
