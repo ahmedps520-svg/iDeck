@@ -615,8 +615,7 @@ engine options.**
 - What followed from the wrong reading: the guard counted both starts against
   the options, and build 42 switched them off.
 
-**Builds 43 and 44** (not yet run on the device; 44 adds the last point and is
-the one to install):
+**Builds 43 to 45** (not yet run on the device; 45 is the one to install):
 - A start counts against the engine options only once QEMU runs with them.
   They are on again, with one failed start as the limit until they have worked.
 - The next launch after such a stop says that it happened in JIT preparation
@@ -625,9 +624,13 @@ the one to install):
   ([PERFORMANCE](PERFORMANCE.md#tcg-cache-flushes-measured-in-ci)), and the log
   records the address ranges, what the debugger wrote into the cache, and the
   flush count after 3, 10, 30 and 60 minutes.
-- A crash on one of QEMU's vCPU threads switches the engine options off at the
-  next launch. The guard above only sees starts in which Linux never came up;
-  an instruction this processor lacks would crash later, at every start.
+- From build 44 a crash on one of QEMU's vCPU threads switches the engine
+  options off at the next launch. The guard above only sees starts in which
+  Linux never came up; an instruction this processor lacks would crash later,
+  at every start.
+- A first try with the engine options ends after 45 s without Linux, with a
+  message. From build 45 that does not apply when iDeck left the screen
+  during the boot, because iOS suspends it then.
 
 ### iOS app builds (`ios.yml`)
 

@@ -54,6 +54,9 @@ final class RuntimeController: ObservableObject {
     /// Linux has come up with these engine options on this build and runtime.
     private var engineProven = false
     private var engineStamp = ""
+    /// iDeck left the screen while Linux was booting: iOS suspends it then,
+    /// so the time since QEMU started says nothing about the engine options.
+    private var bootSawBackground = false
     private let engineStart = EngineStartNote(marker: Paths.nativeFPMarker)
     private var bootRuntimeVersion = ""
     @Published var lastError: String?
@@ -250,6 +253,7 @@ final class RuntimeController: ObservableObject {
     /// Steam update in progress, downloads).
     private func didEnterBackground() {
         logAppState("background")
+        if case .booting = phase { bootSawBackground = true }
         guard case .running = phase, let agent else { return }
         let app = UIApplication.shared
         let task = BackgroundTaskBox()
@@ -557,6 +561,7 @@ final class RuntimeController: ObservableObject {
         bootRuntimeVersion = files.version
         // The start is counted once QEMU runs with the options (connectChannels).
         engineStart.arm(engineInUse)
+        bootSawBackground = false
         if engineInUse && !engineProven {
             warnings.append("Trying the faster CPU engine on this start (native floating point, fast process switching). "
                             + "If Linux does not come up, close iDeck and open it again: the next start runs without it.")
@@ -634,7 +639,7 @@ final class RuntimeController: ObservableObject {
                 jitMemoryFailed("one block translated after \(Int(at)) s")
                 return
             }
-            if at >= 45, engineInUse, !engineProven, case .booting = phase {
+            if at >= 45, engineInUse, !engineProven, !bootSawBackground, case .booting = phase {
                 // Linux reaches the agent in about 7 s on the M5 iPad. The
                 // start is already counted (EngineGuard), so the next one
                 // runs without the options.
