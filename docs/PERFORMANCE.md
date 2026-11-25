@@ -158,6 +158,7 @@ QEMU translates guest code into a fixed buffer (`-accel tcg,tb-size=`). When the
 - 1 GiB would be mapped at 64 GiB or above: the address limit explains the failure, and the largest size that stays below is used.
 - 1 GiB would be mapped below 64 GiB: something else stopped it, and the cache stays at 384 MiB.
 - A larger size that does not run is recorded, and the next start goes back to 384 MiB.
+- While the engine options are on their first try the cache stays at 384 MiB, so a start that fails has one possible cause.
 
 The log has the evidence either way: `jit cache: up to …`, `address ranges before QEMU starts: …`, `jit memory: N of M pages carry the debugger's mark`, and `jit after 3 min: … TB flush count N` (also after 10, 30 and 60 minutes), which is the first count of flushes on the device.
 

@@ -73,6 +73,15 @@ enum JITCachePlan {
         return Choice(mb: provenMb, reason: "no larger size stays below 64 GiB")
     }
 
+    /// One unknown per start: while the engine options are on their first
+    /// try, the cache stays at the size that is known to run, so a start
+    /// that fails has one possible cause.
+    static func oneUnknown(_ choice: Choice, engineFirstTry: Bool) -> Choice {
+        guard engineFirstTry, choice.mb > provenMb else { return choice }
+        return Choice(mb: provenMb, reason: "\(choice.mb) MiB is possible (\(choice.reason)), "
+                          + "but this start is the first try of the engine options")
+    }
+
     // MARK: A size that did not run
 
     /// Contents of the state file: the size and the app build it failed on.

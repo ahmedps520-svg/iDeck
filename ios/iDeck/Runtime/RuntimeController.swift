@@ -488,7 +488,12 @@ final class RuntimeController: ObservableObject {
             // QEMU and the libraries it links are loaded first: they take
             // address space, and the measurement has to see what QEMU will.
             IDQemuLauncher.preloadFramework(atPath: fw.path)
-            inputs.tbCacheMaxMb = chooseJITCache().mb
+            let stamp = EngineGuard.stamp(build: RuntimeController.appBuild, runtime: files.version,
+                                          hostVfp: s.nativeFloatingPoint, keepGlobal: s.fastProcessSwitch)
+            let engineFirstTry = (s.nativeFloatingPoint || s.fastProcessSwitch)
+                && !EngineGuard.isProven(Paths.engineProven, stamp: stamp)
+                && EngineGuard.unfinishedStarts(Paths.nativeFPMarker) < EngineGuard.maxUnfinishedStarts(proven: false)
+            inputs.tbCacheMaxMb = chooseJITCache(engineFirstTry: engineFirstTry).mb
         }
         let limitMb = inputs.appLimitMb
         let plan = try Core.call("memory.plan", inputs, as: MemoryPlan.self)
@@ -675,15 +680,16 @@ final class RuntimeController: ObservableObject {
 
     /// The largest TCG cache StikDebug can prepare, from where each size
     /// would be mapped right now (JITCachePlan). Logs the measurements.
-    private func chooseJITCache() -> JITCachePlan.Choice {
+    private func chooseJITCache(engineFirstTry: Bool) -> JITCachePlan.Choice {
         let sizes = [JITCachePlan.failedOnDeviceMb] + JITCachePlan.largerMb
         let placements = sizes.compactMap { mb -> JITCachePlan.Placement? in
             guard let at = IDPlatform.jitPlacement(forMegabytes: UInt(mb)), at.count == 2 else { return nil }
             return JITCachePlan.Placement(mb: mb, buffer: at[0].uint64Value, view: at[1].uint64Value)
         }
         let record = try? String(contentsOf: Paths.jitCacheFailed, encoding: .utf8)
-        let choice = JITCachePlan.choose(placements: placements,
-                                         failedMb: JITCachePlan.failedMb(record: record, build: RuntimeController.appBuild))
+        let measured = JITCachePlan.choose(placements: placements,
+                                           failedMb: JITCachePlan.failedMb(record: record, build: RuntimeController.appBuild))
+        let choice = JITCachePlan.oneUnknown(measured, engineFirstTry: engineFirstTry)
         DiagLog.write("jit cache: up to \(choice.mb) MiB, \(choice.reason); the executable view would be mapped: "
                       + (placements.isEmpty ? "not measured" : placements.map(\.text).joined(separator: ", ")))
         DiagLog.write("address ranges before QEMU starts: \(IDPlatform.addressRangesSummary)")

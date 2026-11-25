@@ -615,7 +615,7 @@ engine options.**
 - What followed from the wrong reading: the guard counted both starts against
   the options, and build 42 switched them off.
 
-**Builds 43 to 45** (not yet run on the device; 45 is the one to install):
+**Builds 43 to 46** (not yet run on the device; 46 is the one to install):
 - A start counts against the engine options only once QEMU runs with them.
   They are on again, with one failed start as the limit until they have worked.
 - The next launch after such a stop says that it happened in JIT preparation
@@ -631,6 +631,8 @@ engine options.**
 - A first try with the engine options ends after 45 s without Linux, with a
   message. From build 45 that does not apply when iDeck left the screen
   during the boot, because iOS suspends it then.
+- From build 46 a larger cache waits until the engine options have worked or
+  are off: one unknown per start.
 
 ### iOS app builds (`ios.yml`)
 

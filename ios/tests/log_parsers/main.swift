@@ -266,6 +266,12 @@ check(JITCachePlan.choose(placements: [], failedMb: nil).mb == 384, "jit cache: 
 check(JITCachePlan.choose(placements: [placed(768, 0x1_2a00_0000)], failedMb: nil).mb == 384,
       "jit cache: 1 GiB not measured -> 384")
 
+let larger = JITCachePlan.choose(placements: highOnly1024, failedMb: nil)
+let heldBack = JITCachePlan.oneUnknown(larger, engineFirstTry: true)
+check(heldBack.mb == 384 && heldBack.reason.contains("768 MiB is possible"), "jit cache: 384 while the engine options are on their first try")
+check(JITCachePlan.oneUnknown(larger, engineFirstTry: false) == larger, "jit cache: the larger size once the engine options have worked or are off")
+check(JITCachePlan.oneUnknown(unexplained, engineFirstTry: true) == unexplained, "jit cache: nothing to hold back at 384")
+
 check(JITCachePlan.failureRecord(mb: 768, build: "43") == "768|43", "jit failure record")
 check(JITCachePlan.failedMb(record: "768|43\n", build: "43") == 768, "jit failure: this build")
 check(JITCachePlan.failedMb(record: "768|43", build: "44") == nil, "jit failure: another build may try again")
