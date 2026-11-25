@@ -32,6 +32,11 @@ static BOOL gHasStarted = NO;
     return gHasStarted;
 }
 
++ (void)preloadFrameworkAtPath:(NSString *)frameworkPath {
+    NSString *name = frameworkPath.lastPathComponent.stringByDeletingPathExtension;
+    dlopen([frameworkPath stringByAppendingPathComponent:name].fileSystemRepresentation, RTLD_LOCAL | RTLD_NOW);
+}
+
 - (instancetype)initWithFrameworkPath:(NSString *)frameworkPath {
     if (self = [super init]) {
         _frameworkPath = [frameworkPath copy];

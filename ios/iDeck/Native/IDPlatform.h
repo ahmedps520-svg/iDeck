@@ -36,6 +36,23 @@ NS_ASSUME_NONNULL_BEGIN
 /// Runs of executable memory of 64 MiB or more (QEMU's TCG cache), e.g.
 /// "0x2a0000000-0x2b8000000 (384 MiB in 1 entry)".
 @property (class, nonatomic, readonly) NSString *jitRegionSummary;
+/// Start and end of the largest of those runs; NO when there is none.
++ (BOOL)jitRegionStart:(uint64_t *)start end:(uint64_t *)end;
+/// What the first byte of each 16 KiB page in that range holds. On iPadOS
+/// 26 and later the debugger makes QEMU's cache executable by writing 0x69
+/// there, so pages that still read zero were never prepared. Returns
+/// @[pages, pages reading 0x69, pages reading zero, offset in MiB of the
+/// first page reading zero or -1].
++ (NSArray<NSNumber *> *)jitPageMarksFrom:(uint64_t)start to:(uint64_t)end;
+/// Where QEMU's TCG cache of this size would be mapped right now. QEMU
+/// maps the buffer and then a second view of it, each where the kernel
+/// finds room; this does the same with address space only and frees it
+/// again. Returns @[buffer address, view address], or nil when either
+/// mapping fails.
++ (nullable NSArray<NSNumber *> *)jitPlacementForMegabytes:(NSUInteger)megabytes;
+/// Free address ranges of 256 MiB or more and mapped runs of 8 GiB or more,
+/// lowest first: "free 0x12a000000-0x180000000 (1376 MiB), mapped ...".
+@property (class, nonatomic, readonly) NSString *addressRangesSummary;
 @property (class, nonatomic, readonly) uint64_t physicalMemory;
 /// e.g. "iPad17,1"
 @property (class, nonatomic, readonly) NSString *modelIdentifier;

@@ -42,18 +42,23 @@ struct Settings: Codable, Equatable {
     /// 38+, sideload edition). CI on an ARM64 host: every listed
     /// instruction gives the same bits as hardware; see docs/CPU_ENGINE.md.
     /// RuntimeController turns it off by itself if Linux did not come up
-    /// with it. Off by default since build 42: on the M5 iPad the two starts
-    /// with the engine options on froze as QEMU started (build 41), and
-    /// they have not yet run on a device.
-    var nativeFloatingPoint = false
+    /// with it (EngineGuard), or if the floating-point check in Linux finds
+    /// a difference. Build 42 had it off: two starts with the engine options
+    /// on froze on the M5 iPad (build 41). Their logs and QEMU's source show
+    /// the debugger stopped iDeck while it prepared JIT memory, before QEMU
+    /// reads its CPU options, so the options had no part in it. On again
+    /// from build 43 (settings version 3); not yet run on a device.
+    var nativeFloatingPoint = true
     /// QEMU keeps Linux's kernel address translations when Linux switches
     /// between programs, instead of emptying its translation cache each
     /// time (iDeck's engine patch 0002). CI: a switch cost about half.
     /// Same guard and default as nativeFloatingPoint.
-    var fastProcessSwitch = false
+    var fastProcessSwitch = true
     /// Settings written before version 2 had neoverse-n1 as the default CPU
-    /// model; load() moves those to the new default once.
-    var settingsVersion = 2
+    /// model; load() moves those to the new default once. Version 3 switches
+    /// the engine options back on once: builds 41 and 42 switched them off
+    /// for a freeze they did not cause.
+    var settingsVersion = 3
     var vulkan = true
     /// Diagnostic: boot without GPU acceleration (plain virtio-gpu, SPICE 2D,
     /// software rendering in Linux). Slow, but isolates GPU-path crashes.
@@ -109,10 +114,15 @@ struct Settings: Codable, Equatable {
         merged.merge(saved) { _, new in new }
         guard let mergedData = try? JSONSerialization.data(withJSONObject: merged),
               var s = try? JSONDecoder().decode(Settings.self, from: mergedData) else { return Settings() }
-        if (saved["settingsVersion"] as? Int ?? 1) < 2 {
+        let version = saved["settingsVersion"] as? Int ?? 1
+        if version < 2 {
             // neoverse-n1 was the default, not a choice, before version 2.
             if s.cpuModel == "neoverse-n1" { s.cpuModel = "max" }
-            s.settingsVersion = 2
+        }
+        if version < 3 {
+            s.nativeFloatingPoint = true
+            s.fastProcessSwitch = true
+            s.settingsVersion = 3
         }
         return s
     }

@@ -31,8 +31,12 @@ enum Paths {
     static var journal: URL { state.appendingPathComponent("install-journal.json") }
     static var installedManifest: URL { state.appendingPathComponent("manifest.json") }
     static var settingsFile: URL { state.appendingPathComponent("settings.json") }
-    /// Starts with native floating point that have not reached the guest agent (EngineGuard).
+    /// Starts with engine options in which QEMU ran but Linux did not reach the guest agent (EngineGuard).
     static var nativeFPMarker: URL { state.appendingPathComponent("native-fp-starts") }
+    /// The app build, runtime and engine options Linux last came up with (EngineGuard.stamp).
+    static var engineProven: URL { state.appendingPathComponent("engine-proven") }
+    /// A TCG cache size above the proven one that did not run (JITCachePlan.failureRecord).
+    static var jitCacheFailed: URL { state.appendingPathComponent("jit-cache-failed") }
     /// Scratch backing for guest RAM (Settings.ramInFile): in Caches, so it
     /// is never backed up; recreated empty at every boot.
     static var guestRAMFile: URL {

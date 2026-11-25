@@ -165,16 +165,21 @@ check(ShmGroup.forQEMU(usable: "group.com.ideck.app.ABCDE12345", fileFallback: t
 check(ShmGroup.forQEMU(usable: nil, fileFallback: false) == nil, "nothing usable -> unset")
 check(ShmGroup.fallback.count <= ShmGroup.maxLength && ShmGroup.fallback.hasPrefix("group."), "fallback name fits")
 
-// Native floating point: on unless Linux failed to come up with it twice (EngineGuard.swift).
-check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 0)
-      == EngineGuard.Decision(useEngine: true, switchSettingsOff: false), "engine options: used when on and supported")
-check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 1)
-      == EngineGuard.Decision(useEngine: true, switchSettingsOff: false), "engine options: one unfinished start is tolerated")
-check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 2)
-      == EngineGuard.Decision(useEngine: false, switchSettingsOff: true), "engine options: two unfinished starts switch them off")
-check(EngineGuard.decide(anySettingOn: true, supported: false, unfinishedStarts: 0)
+// Engine options: tried, and switched off when QEMU ran with them and Linux did
+// not come up; once until they have worked, twice in a row after (EngineGuard.swift).
+let engineUse = EngineGuard.Decision(useEngine: true, switchSettingsOff: false)
+let engineOff = EngineGuard.Decision(useEngine: false, switchSettingsOff: true)
+check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 0, proven: false) == engineUse,
+      "engine options: used when on and supported")
+check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 1, proven: false) == engineOff,
+      "engine options: one unfinished start switches them off while they have never worked")
+check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 1, proven: true) == engineUse,
+      "engine options: one unfinished start is tolerated once they have worked")
+check(EngineGuard.decide(anySettingOn: true, supported: true, unfinishedStarts: 2, proven: true) == engineOff,
+      "engine options: two unfinished starts switch them off")
+check(EngineGuard.decide(anySettingOn: true, supported: false, unfinishedStarts: 0, proven: false)
       == EngineGuard.Decision(useEngine: false, switchSettingsOff: false), "engine options: not in the interpreter edition")
-check(EngineGuard.decide(anySettingOn: false, supported: true, unfinishedStarts: 5)
+check(EngineGuard.decide(anySettingOn: false, supported: true, unfinishedStarts: 5, proven: true)
       == EngineGuard.Decision(useEngine: false, switchSettingsOff: false), "engine options: off stays off")
 let fpMarker = FileManager.default.temporaryDirectory.appendingPathComponent("ideck-native-fp-\(ProcessInfo.processInfo.processIdentifier)")
 EngineGuard.clear(fpMarker)
@@ -184,6 +189,35 @@ EngineGuard.noteStart(fpMarker)
 check(EngineGuard.unfinishedStarts(fpMarker) == 2, "native FP marker: counts starts")
 EngineGuard.clear(fpMarker)
 check(EngineGuard.unfinishedStarts(fpMarker) == 0, "native FP marker: cleared when Linux comes up")
+
+// A start is counted once, from whichever place sees QEMU running first; a
+// start the debugger stops before that is never counted.
+let engineNote = EngineStartNote(marker: fpMarker)
+engineNote.fire()
+check(EngineGuard.unfinishedStarts(fpMarker) == 0, "engine start: not counted when the start has no engine options")
+engineNote.arm(true)
+check(EngineGuard.unfinishedStarts(fpMarker) == 0, "engine start: not counted before QEMU runs")
+engineNote.fire()
+engineNote.fire()
+check(EngineGuard.unfinishedStarts(fpMarker) == 1, "engine start: counted once")
+engineNote.arm(true)
+engineNote.arm(false)
+engineNote.fire()
+check(EngineGuard.unfinishedStarts(fpMarker) == 1, "engine start: not counted after Linux came up")
+EngineGuard.clear(fpMarker)
+
+let provenFile = FileManager.default.temporaryDirectory.appendingPathComponent("ideck-engine-proven-\(ProcessInfo.processInfo.processIdentifier)")
+EngineGuard.clear(provenFile)
+let stamp43 = EngineGuard.stamp(build: "43", runtime: "0.1.14", hostVfp: true, keepGlobal: true)
+check(stamp43 == "43|0.1.14|11", "engine stamp: \(stamp43)")
+check(!EngineGuard.isProven(provenFile, stamp: stamp43), "engine: not proven before Linux came up with it")
+EngineGuard.noteProven(provenFile, stamp: stamp43)
+check(EngineGuard.isProven(provenFile, stamp: stamp43), "engine: proven for this build, runtime and options")
+check(!EngineGuard.isProven(provenFile, stamp: EngineGuard.stamp(build: "44", runtime: "0.1.14", hostVfp: true, keepGlobal: true)),
+      "engine: a new build has to prove it again")
+check(!EngineGuard.isProven(provenFile, stamp: EngineGuard.stamp(build: "43", runtime: "0.1.14", hostVfp: true, keepGlobal: false)),
+      "engine: other options have to prove themselves")
+EngineGuard.clear(provenFile)
 
 // The agent's fpcheck.run reply, as JSONSerialization delivers it.
 func fpReply(_ json: String) -> [String: Any] {
@@ -197,6 +231,54 @@ let fpBad = EngineGuard.checkSummary(fpReply(#"{"reference": true, "patterns": 1
 check(!fpBad.ok && fpBad.text == "native: 2 of 189 instruction patterns differ from Neoverse-N2 (FADD_s, FCMP); mixed sequences differ", "fpcheck summary: \(fpBad.text)")
 let fpNone = EngineGuard.checkSummary(fpReply(#"{"reference": false, "patterns": 0, "match": false}"#), nativeFP: true)
 check(!fpNone.ok && fpNone.text.contains("no hardware reference"), "fpcheck summary without a reference")
+check(EngineGuard.checkFoundDifference(fpReply(#"{"reference": true, "patterns": 189, "match": false, "values_differ": 2}"#)),
+      "fpcheck: a difference from hardware is a finding")
+check(!EngineGuard.checkFoundDifference(fpReply(#"{"reference": true, "patterns": 189, "match": true, "flags_match": false}"#)),
+      "fpcheck: matching values are not a finding")
+check(!EngineGuard.checkFoundDifference(fpReply(#"{"reference": false, "patterns": 0, "match": false}"#)),
+      "fpcheck: no reference is not a finding")
+
+// TCG cache size from where QEMU would map it (JITCachePlan.swift).
+func placed(_ mb: UInt64, _ view: UInt64) -> JITCachePlan.Placement {
+    JITCachePlan.Placement(mb: mb, buffer: 0x1_2000_0000, view: view)
+}
+let gib64: UInt64 = 1 << 36
+check(placed(384, 0x1_3a7c_0000).addressable, "jit placement: the cache of build 41 (0x13a7c0000) is addressable")
+check(placed(1024, gib64 - (1024 << 20)).addressable, "jit placement: ending exactly at 64 GiB is addressable")
+check(!placed(1024, gib64 - (1024 << 20) + 16384).addressable, "jit placement: one page past 64 GiB is not")
+check(!placed(512, 0).addressable, "jit placement: an address of zero is no placement")
+check(placed(768, 0x10_4000_0000).text == "768 MiB at 0x1040000000 (reaches 64 GiB or above)", "jit placement text")
+
+let highOnly1024 = [placed(1024, 0x10_4000_0000), placed(768, 0x1_2a00_0000), placed(512, 0x1_2a00_0000)]
+check(JITCachePlan.choose(placements: highOnly1024, failedMb: nil).mb == 768,
+      "jit cache: 1 GiB above 64 GiB, 768 MiB below -> 768")
+let high768 = [placed(1024, 0x10_4000_0000), placed(768, 0x10_4000_0000), placed(512, 0x1_4a00_0000)]
+check(JITCachePlan.choose(placements: high768, failedMb: nil).mb == 512,
+      "jit cache: only 512 MiB stays below 64 GiB -> 512")
+let allHigh = [placed(1024, 0x10_4000_0000), placed(768, 0x10_4000_0000), placed(512, 0x10_4000_0000)]
+check(JITCachePlan.choose(placements: allHigh, failedMb: nil).mb == 384, "jit cache: nothing larger stays below 64 GiB -> 384")
+let allLow = [placed(1024, 0x2_8000_0000), placed(768, 0x1_2a00_0000), placed(512, 0x1_2a00_0000)]
+let unexplained = JITCachePlan.choose(placements: allLow, failedMb: nil)
+check(unexplained.mb == 384 && unexplained.reason.contains("does not explain"),
+      "jit cache: 1 GiB below 64 GiB did not run for another reason -> 384")
+check(JITCachePlan.choose(placements: highOnly1024, failedMb: 768).mb == 384, "jit cache: a size that did not run -> 384")
+check(JITCachePlan.choose(placements: [], failedMb: nil).mb == 384, "jit cache: no measurement -> 384")
+check(JITCachePlan.choose(placements: [placed(768, 0x1_2a00_0000)], failedMb: nil).mb == 384,
+      "jit cache: 1 GiB not measured -> 384")
+
+check(JITCachePlan.failureRecord(mb: 768, build: "43") == "768|43", "jit failure record")
+check(JITCachePlan.failedMb(record: "768|43\n", build: "43") == 768, "jit failure: this build")
+check(JITCachePlan.failedMb(record: "768|43", build: "44") == nil, "jit failure: another build may try again")
+check(JITCachePlan.failedMb(record: "384|43", build: "43") == nil, "jit failure: the proven size is never a failure")
+check(JITCachePlan.failedMb(record: "nonsense", build: "43") == nil && JITCachePlan.failedMb(record: nil, build: "43") == nil,
+      "jit failure: no record")
+
+let preparedMarks = JITCachePlan.PageMarks(pages: 24576, marked: 24570, zero: 2, firstZeroMb: 0)
+check(!preparedMarks.unprepared, "jit marks: a few zero pages are QEMU's own code")
+check(preparedMarks.text == "24570 of 24576 pages carry the debugger's mark, 2 read zero (first at 0 MiB)", "jit marks text")
+check(JITCachePlan.PageMarks(pages: 65536, marked: 0, zero: 65530, firstZeroMb: 0).unprepared, "jit marks: nothing written")
+check(JITCachePlan.PageMarks(pages: 65536, marked: 32768, zero: 32768, firstZeroMb: 512).unprepared, "jit marks: half written")
+check(!JITCachePlan.PageMarks(pages: 0, marked: 0, zero: 0, firstZeroMb: -1).unprepared, "jit marks: no region")
 
 // crash.log entry from the device (build 41, GPU-drawn Steam UI).
 let gpuCrash = """

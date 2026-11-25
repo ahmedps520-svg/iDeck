@@ -12,10 +12,35 @@ import UIKit
 enum SessionMarker {
     private static var url: URL { Paths.support.appendingPathComponent("linux-session.json") }
 
+    /// How far a start got. QEMU reads its settings, builds the machine and
+    /// answers the app only after the debugger has prepared JIT memory.
+    enum Stage: String {
+        /// QEMU's thread was started; nothing has been heard since.
+        case started
+        /// iDeck was still running 12 s later, but QEMU had not answered.
+        case silent
+        /// QEMU answered: its main loop runs.
+        case qemu
+        /// The guest agent in Linux reported ready.
+        case linux
+    }
+
     static func begin(runtime: String) {
-        let info: [String: Any] = ["started": Date().timeIntervalSince1970, "pid": Int(getpid()), "runtime": runtime]
+        let info: [String: Any] = ["started": Date().timeIntervalSince1970, "pid": Int(getpid()), "runtime": runtime,
+                                   "stage": Stage.started.rawValue]
         if let data = try? JSONSerialization.data(withJSONObject: info) {
             try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Records the stage this process's start has reached (any thread).
+    static func update(stage: Stage) {
+        guard let data = try? Data(contentsOf: url),
+              var info = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (info["pid"] as? NSNumber)?.intValue == Int(getpid()) else { return }
+        info["stage"] = stage.rawValue
+        if let out = try? JSONSerialization.data(withJSONObject: info) {
+            try? out.write(to: url, options: .atomic)
         }
     }
 
@@ -37,6 +62,15 @@ enum SessionMarker {
         var lastLogLine: String?
         /// iOS reported memory pressure or a memory warning during it.
         var memoryPressure = false
+        /// How far the start got (nil: recorded by a build before 43).
+        var stage: Stage?
+
+        /// The process ended without a crash while QEMU had been started and
+        /// was never heard from, not even by the check 12 s later. A running
+        /// process logs that check, so iDeck was held stopped: by the
+        /// debugger, in the step that prepares JIT memory. (Closing iDeck
+        /// within a second or two of starting Linux looks the same.)
+        var stoppedBeforeQEMUAnswered: Bool { stage == .started && signal == nil }
 
         var logLine: String {
             let age = lastLogLine.map { ", last log line \($0)" } ?? ""
@@ -44,12 +78,30 @@ enum SessionMarker {
                 + (memoryPressure ? ", iOS reported memory pressure" : "")
             let how = signal.map { "crashed with \($0) (see crash.log)" }
                 ?? "ended without a crash signal (SIGKILL from iOS or a debugger, or closed in the app switcher)"
+            let reached: String
+            switch stage {
+            case .started: reached = "; QEMU never answered and iDeck logged nothing after starting it (stopped in JIT preparation)"
+            case .silent: reached = "; QEMU never answered, iDeck kept running"
+            case .qemu: reached = "; QEMU answered, Linux did not reach the guest agent"
+            case .linux: reached = "; Linux was up"
+            case nil: reached = ""
+            }
             return "previous session: Linux \(runtime) was running in pid \(pid) since "
-                + "\(ISO8601DateFormatter().string(from: started))\(state)\(age); iDeck \(how)"
+                + "\(ISO8601DateFormatter().string(from: started))\(state)\(age); iDeck \(how)\(reached)"
         }
 
         /// Plain-language notice for the home screen.
         var userMessage: String {
+            if stoppedBeforeQEMUAnswered {
+                return "The last start stopped before Linux began. Most likely StikDebug held iDeck while it prepared JIT memory "
+                    + "and did not let it continue, which leaves the screen on Connecting to Linux. "
+                    + "No iDeck setting is involved at that point. Start Linux again; "
+                    + "if it happens twice in a row, close StikDebug in the app switcher as well before the next try."
+            }
+            if signal == nil, stage == .silent || stage == .qemu {
+                return "The last start did not get as far as Linux: QEMU was started, but Linux had not come up when iDeck closed. "
+                    + "If that was not you closing it, share the logs from Diagnostics."
+            }
             if let signal {
                 return "iDeck crashed while Linux was running (\(signal)). Share the logs from Diagnostics so it can be fixed."
             }
@@ -76,6 +128,7 @@ enum SessionMarker {
         guard pid != Int(getpid()) else { return nil }
         var p = Previous(started: Date(timeIntervalSince1970: started), pid: pid,
                          runtime: info["runtime"] as? String ?? "?")
+        p.stage = (info["stage"] as? String).flatMap(Stage.init(rawValue:))
         if let crashes = try? String(contentsOf: Paths.crashLog, encoding: .utf8) {
             p.signal = SessionLogParsing.crashSignal(in: crashes, since: started)
             p.crashThread = SessionLogParsing.crashThread(in: crashes, since: started)

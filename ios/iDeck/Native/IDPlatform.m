@@ -203,20 +203,9 @@ static NSString *IDDescribeAddress(uint64_t addr) {
                                       quiet ? [NSString stringWithFormat:@" (+%d quiet)", quiet] : @""];
 }
 
-+ (NSString *)jitRegionSummary {
-    // Adjacent executable entries are joined: pages the debugger wrote to may
-    // each become an entry of their own.
-    NSMutableArray<NSString *> *runs = [NSMutableArray array];
+/// Every entry of the address map, lowest first.
+static void IDEachRegion(void (^block)(uint64_t addr, uint64_t size, vm_prot_t protection)) {
     vm_address_t addr = 0;
-    __block vm_address_t runStart = 0, runEnd = 0;
-    __block unsigned entries = 0;
-    void (^flush)(void) = ^{
-        if (runEnd - runStart >= (64ull << 20)) {
-            [runs addObject:[NSString stringWithFormat:@"0x%llx-0x%llx (%llu MiB in %u entr%@)",
-                             (unsigned long long)runStart, (unsigned long long)runEnd,
-                             (unsigned long long)((runEnd - runStart) >> 20), entries, entries == 1 ? @"y" : @"ies"]];
-        }
-    };
     for (;;) {
         vm_size_t size = 0;
         vm_region_basic_info_data_64_t info;
@@ -225,22 +214,151 @@ static NSString *IDDescribeAddress(uint64_t addr) {
         if (vm_region_64(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info,
                          &count, &object) != KERN_SUCCESS) break;
         if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
-        if ((info.protection & VM_PROT_EXECUTE) && addr == runEnd && entries > 0) {
-            runEnd = addr + size;
-            entries++;
-        } else {
-            flush();
-            entries = 0;
-            if (info.protection & VM_PROT_EXECUTE) {
-                runStart = addr;
-                runEnd = addr + size;
-                entries = 1;
-            }
-        }
+        block(addr, size, info.protection);
         addr += size;
     }
+}
+
+/// Runs of executable memory of 64 MiB or more as @[start, end, entries].
+/// Adjacent executable entries are joined: pages the debugger wrote to may
+/// each become an entry of their own.
+static NSArray<NSArray<NSNumber *> *> *IDExecutableRuns(void) {
+    NSMutableArray<NSArray<NSNumber *> *> *runs = [NSMutableArray array];
+    __block uint64_t runStart = 0, runEnd = 0;
+    __block unsigned entries = 0;
+    void (^flush)(void) = ^{
+        if (entries > 0 && runEnd - runStart >= (64ull << 20)) {
+            [runs addObject:@[@(runStart), @(runEnd), @(entries)]];
+        }
+        runStart = 0;
+        runEnd = 0;
+        entries = 0;
+    };
+    IDEachRegion(^(uint64_t addr, uint64_t size, vm_prot_t protection) {
+        BOOL executable = (protection & VM_PROT_EXECUTE) != 0;
+        if (executable && entries > 0 && addr == runEnd) {
+            runEnd = addr + size;
+            entries++;
+            return;
+        }
+        flush();
+        if (executable) {
+            runStart = addr;
+            runEnd = addr + size;
+            entries = 1;
+        }
+    });
     flush();
-    return runs.count ? [runs componentsJoinedByString:@", "] : @"none of 64 MiB or more";
+    return runs;
+}
+
++ (NSString *)jitRegionSummary {
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    for (NSArray<NSNumber *> *run in IDExecutableRuns()) {
+        unsigned long long start = run[0].unsignedLongLongValue, end = run[1].unsignedLongLongValue;
+        unsigned entries = run[2].unsignedIntValue;
+        [out addObject:[NSString stringWithFormat:@"0x%llx-0x%llx (%llu MiB in %u entr%@)", start, end,
+                        (end - start) >> 20, entries, entries == 1 ? @"y" : @"ies"]];
+    }
+    return out.count ? [out componentsJoinedByString:@", "] : @"none of 64 MiB or more";
+}
+
++ (BOOL)jitRegionStart:(uint64_t *)start end:(uint64_t *)end {
+    uint64_t bestStart = 0, bestEnd = 0;
+    for (NSArray<NSNumber *> *run in IDExecutableRuns()) {
+        uint64_t a = run[0].unsignedLongLongValue, b = run[1].unsignedLongLongValue;
+        if (b - a > bestEnd - bestStart) {
+            bestStart = a;
+            bestEnd = b;
+        }
+    }
+    if (bestEnd == 0) return NO;
+    *start = bestStart;
+    *end = bestEnd;
+    return YES;
+}
+
++ (NSArray<NSNumber *> *)jitPageMarksFrom:(uint64_t)start to:(uint64_t)end {
+    const uint64_t page = 16384;
+    uint64_t pages = 0, marked = 0, zero = 0;
+    long long firstZeroMb = -1;
+    for (uint64_t at = start; at + page <= end; at += page) {
+        uint8_t first = *(const volatile uint8_t *)(uintptr_t)at;
+        pages++;
+        if (first == 0x69) {
+            marked++;
+        } else if (first == 0) {
+            if (zero == 0) firstZeroMb = (long long)((at - start) >> 20);
+            zero++;
+        }
+    }
+    return @[@(pages), @(marked), @(zero), @(firstZeroMb)];
+}
+
++ (NSArray<NSNumber *> *)jitPlacementForMegabytes:(NSUInteger)megabytes {
+    size_t size = (size_t)megabytes << 20;
+    void *buffer = mmap(NULL, size, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (buffer == MAP_FAILED) return nil;
+    vm_address_t view = 0;
+    vm_prot_t cur = VM_PROT_NONE, max = VM_PROT_NONE;
+    kern_return_t kr = vm_remap(mach_task_self(), &view, size, 0, VM_FLAGS_ANYWHERE, mach_task_self(),
+                                (vm_address_t)buffer, FALSE, &cur, &max, VM_INHERIT_NONE);
+    NSArray<NSNumber *> *result = nil;
+    if (kr == KERN_SUCCESS) {
+        result = @[@((uint64_t)(uintptr_t)buffer), @((uint64_t)view)];
+        vm_deallocate(mach_task_self(), view, size);
+    }
+    munmap(buffer, size);
+    return result;
+}
+
+static NSString *IDDescribeRange(NSString *kind, uint64_t start, uint64_t end) {
+    uint64_t size = end - start;
+    NSString *amount = size >= (4ull << 30)
+        ? [NSString stringWithFormat:@"%.1f GiB", size / (1024.0 * 1024.0 * 1024.0)]
+        : [NSString stringWithFormat:@"%llu MiB", (unsigned long long)(size >> 20)];
+    return [NSString stringWithFormat:@"%@ 0x%llx-0x%llx (%@)", kind, (unsigned long long)start,
+            (unsigned long long)end, amount];
+}
+
++ (NSString *)addressRangesSummary {
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    uint64_t lowest = 0, highest = 0;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS
+        && count >= TASK_VM_INFO_REV2_COUNT) {
+        lowest = info.min_address;
+        highest = info.max_address;
+    }
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    __block uint64_t runStart = 0, runEnd = 0;
+    void (^endRun)(void) = ^{
+        if (runEnd - runStart >= (8ull << 30)) [parts addObject:IDDescribeRange(@"mapped", runStart, runEnd)];
+    };
+    IDEachRegion(^(uint64_t addr, uint64_t size, vm_prot_t protection) {
+        (void)protection;
+        if (runEnd != 0 && addr == runEnd) {
+            runEnd = addr + size;
+            return;
+        }
+        endRun();
+        uint64_t gapStart = runEnd != 0 ? runEnd : lowest;
+        if (addr > gapStart && addr - gapStart >= (256ull << 20)) {
+            [parts addObject:IDDescribeRange(@"free", gapStart, addr)];
+        }
+        runStart = addr;
+        runEnd = addr + size;
+    });
+    endRun();
+    if (highest > runEnd && highest - runEnd >= (256ull << 20)) {
+        [parts addObject:IDDescribeRange(@"free", runEnd, highest)];
+    }
+    if (parts.count > 24) {
+        NSUInteger more = parts.count - 24;
+        [parts removeObjectsInRange:NSMakeRange(24, more)];
+        [parts addObject:[NSString stringWithFormat:@"and %lu more", (unsigned long)more]];
+    }
+    return parts.count ? [parts componentsJoinedByString:@", "] : @"nothing of that size";
 }
 
 + (uint64_t)physicalMemory {

@@ -49,6 +49,12 @@ final class RuntimeController: ObservableObject {
     /// Result of the floating-point check in Linux (EngineGuard.checkSummary), once it has run.
     @Published private(set) var engineCheck: String?
     private var nativeFPInUse = false
+    /// This start runs with at least one engine option.
+    private var engineInUse = false
+    /// Linux has come up with these engine options on this build and runtime.
+    private var engineProven = false
+    private var engineStamp = ""
+    private let engineStart = EngineStartNote(marker: Paths.nativeFPMarker)
     private var bootRuntimeVersion = ""
     @Published var lastError: String?
 
@@ -70,6 +76,7 @@ final class RuntimeController: ObservableObject {
 
     /// "jit" for the sideload edition, "se" for the interpreter (TestFlight) edition.
     nonisolated static let edition: String = (Bundle.main.object(forInfoDictionaryKey: "IDeckEdition") as? String) ?? "jit"
+    nonisolated static let appBuild: String = (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "?"
 
     /// Venus (Vulkan) blob memory is POSIX shared memory named under an app
     /// group (UTM's virglrenderer, anon_file.c); iOS refuses the name unless
@@ -447,7 +454,17 @@ final class RuntimeController: ObservableObject {
     private func boot(_ files: RuntimeFiles) async throws {
         let s = settings
         phase = .starting("Planning memory")
-        let inputs = MemoryInputs.measured(s)
+        guard let fw = Bundle.main.privateFrameworksURL?.appendingPathComponent("qemu-aarch64-softmmu.framework"),
+              FileManager.default.fileExists(atPath: fw.path) else {
+            throw Core.CallError(message: "QEMU framework missing from the app bundle (build problem).")
+        }
+        var inputs = MemoryInputs.measured(s)
+        if inputs.tbCacheMaxMb != 0 {
+            // QEMU and the libraries it links are loaded first: they take
+            // address space, and the measurement has to see what QEMU will.
+            IDQemuLauncher.preloadFramework(atPath: fw.path)
+            inputs.tbCacheMaxMb = chooseJITCache().mb
+        }
         let limitMb = inputs.appLimitMb
         let plan = try Core.call("memory.plan", inputs, as: MemoryPlan.self)
         self.plan = plan
@@ -494,9 +511,13 @@ final class RuntimeController: ObservableObject {
         cfg.splitWx = RuntimeController.edition == "jit"
         // The engine options need iDeck's patched QEMU, which only the JIT
         // edition embeds (the interpreter edition uses UTM's build).
+        engineStamp = EngineGuard.stamp(build: RuntimeController.appBuild, runtime: files.version,
+                                        hostVfp: s.nativeFloatingPoint, keepGlobal: s.fastProcessSwitch)
+        engineProven = EngineGuard.isProven(Paths.engineProven, stamp: engineStamp)
+        let unfinished = EngineGuard.unfinishedStarts(Paths.nativeFPMarker)
         let engine = EngineGuard.decide(anySettingOn: s.nativeFloatingPoint || s.fastProcessSwitch,
                                         supported: RuntimeController.edition == "jit",
-                                        unfinishedStarts: EngineGuard.unfinishedStarts(Paths.nativeFPMarker))
+                                        unfinishedStarts: unfinished, proven: engineProven)
         if engine.switchSettingsOff {
             var changed = Settings.load()
             changed.nativeFloatingPoint = false
@@ -504,17 +525,24 @@ final class RuntimeController: ObservableObject {
             changed.save()
             NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
             EngineGuard.clear(Paths.nativeFPMarker)
-            warnings.append("Native floating point and Fast process switching were switched off: Linux did not finish "
-                            + "starting with them the last \(EngineGuard.maxUnfinishedStarts) times. You can switch them back on in Settings \u{203A} Advanced.")
-            DiagLog.write("engine: options switched off after \(EngineGuard.maxUnfinishedStarts) unfinished starts")
+            warnings.append("Native floating point and Fast process switching were switched off: QEMU ran with them and Linux "
+                            + "did not come up (\(unfinished) start\(unfinished == 1 ? "" : "s")). You can switch them back on in Settings \u{203A} Advanced.")
+            DiagLog.write("engine: options switched off after \(unfinished) unfinished start\(unfinished == 1 ? "" : "s")")
         }
         cfg.hostVfp = engine.useEngine && s.nativeFloatingPoint
         cfg.tlbKeepGlobal = engine.useEngine && s.fastProcessSwitch
         nativeFPInUse = cfg.hostVfp
+        engineInUse = cfg.hostVfp || cfg.tlbKeepGlobal
         bootRuntimeVersion = files.version
-        if cfg.hostVfp || cfg.tlbKeepGlobal { EngineGuard.noteStart(Paths.nativeFPMarker) }
+        // The start is counted once QEMU runs with the options (connectChannels).
+        engineStart.arm(engineInUse)
+        if engineInUse && !engineProven {
+            warnings.append("Trying the faster CPU engine on this start (native floating point, fast process switching). "
+                            + "If Linux does not come up, close iDeck and open it again: the next start runs without it.")
+        }
         DiagLog.write("engine: native floating point \(cfg.hostVfp ? "on (x-host-vfp)" : "off"), "
-                      + "kernel translations kept across process switches \(cfg.tlbKeepGlobal ? "on (x-asid-keep-global)" : "off")")
+                      + "kernel translations kept across process switches \(cfg.tlbKeepGlobal ? "on (x-asid-keep-global)" : "off")"
+                      + (engineInUse ? (engineProven ? "; Linux has come up with them on this build" : "; first try on this build") : ""))
         if s.ramInFile {
             // Guest RAM as a shared file mapping: iPadOS can write those pages
             // back to disk and drop them, and they are not charged to the app's
@@ -535,10 +563,6 @@ final class RuntimeController: ObservableObject {
         DiagLog.write("qemu: " + argv.dropFirst().joined(separator: " "))
 
         phase = .starting("Starting Linux")
-        guard let fw = Bundle.main.privateFrameworksURL?.appendingPathComponent("qemu-aarch64-softmmu.framework"),
-              FileManager.default.fileExists(atPath: fw.path) else {
-            throw Core.CallError(message: "QEMU framework missing from the app bundle (build problem).")
-        }
         let launcher = IDQemuLauncher(frameworkPath: fw.path)
         self.launcher = launcher
         bootStarted = Date()
@@ -586,13 +610,84 @@ final class RuntimeController: ObservableObject {
                 // A normal boot translates thousands of blocks in its first
                 // second. One block after 20 s: the generated code does not
                 // run (build 40), and only a fresh process gets new JIT memory.
-                DiagLog.write("boot: JIT memory does not run; Linux cannot start in this session")
-                EngineGuard.clear(Paths.nativeFPMarker)  // says nothing about the engine options
-                relaunchReason = "Linux could not start: the JIT memory StikDebug prepared does not run. "
-                    + "Close iDeck from the app switcher, open it again and enable JIT."
+                jitMemoryFailed("one block translated after \(Int(at)) s")
+                return
+            }
+            if at >= 45, engineInUse, !engineProven, case .booting = phase {
+                // Linux reaches the agent in about 7 s on the M5 iPad. The
+                // start is already counted (EngineGuard), so the next one
+                // runs without the options.
+                DiagLog.write("boot: Linux has not come up \(Int(at)) s after QEMU started with the engine options; threads:\n  "
+                              + IDPlatform.threadStackSummary())
+                relaunchReason = "Linux did not come up with the faster CPU engine. Close iDeck from the app switcher "
+                    + "and open it again: the next start runs without it."
                 phase = .needsRelaunch
                 return
             }
+        }
+    }
+
+    /// The translated code does not run in this process, and only a fresh
+    /// launch gets new JIT memory. A cache above the size that is known to
+    /// run is recorded, so the next start goes back to that size.
+    private func jitMemoryFailed(_ evidence: String) {
+        DiagLog.write("boot: JIT memory does not run (\(evidence)); Linux cannot start in this session")
+        // Says nothing about the engine options.
+        engineStart.arm(false)
+        EngineGuard.clear(Paths.nativeFPMarker)
+        var next = ""
+        if let mb = plan?.tbCacheMb, mb > JITCachePlan.provenMb {
+            try? JITCachePlan.failureRecord(mb: mb, build: RuntimeController.appBuild)
+                .write(to: Paths.jitCacheFailed, atomically: true, encoding: .utf8)
+            DiagLog.write("jit cache: \(mb) MiB recorded as not running; the next start uses \(JITCachePlan.provenMb) MiB")
+            next = " The next start uses a smaller translation cache."
+        }
+        relaunchReason = "Linux could not start: the JIT memory StikDebug prepared does not run.\(next) "
+            + "Close iDeck from the app switcher, open it again and enable JIT."
+        phase = .needsRelaunch
+    }
+
+    /// The largest TCG cache StikDebug can prepare, from where each size
+    /// would be mapped right now (JITCachePlan). Logs the measurements.
+    private func chooseJITCache() -> JITCachePlan.Choice {
+        let sizes = [JITCachePlan.failedOnDeviceMb] + JITCachePlan.largerMb
+        let placements = sizes.compactMap { mb -> JITCachePlan.Placement? in
+            guard let at = IDPlatform.jitPlacement(forMegabytes: UInt(mb)), at.count == 2 else { return nil }
+            return JITCachePlan.Placement(mb: mb, buffer: at[0].uint64Value, view: at[1].uint64Value)
+        }
+        let record = try? String(contentsOf: Paths.jitCacheFailed, encoding: .utf8)
+        let choice = JITCachePlan.choose(placements: placements,
+                                         failedMb: JITCachePlan.failedMb(record: record, build: RuntimeController.appBuild))
+        DiagLog.write("jit cache: up to \(choice.mb) MiB, \(choice.reason); the executable view would be mapped: "
+                      + (placements.isEmpty ? "not measured" : placements.map(\.text).joined(separator: ", ")))
+        DiagLog.write("address ranges before QEMU starts: \(IDPlatform.addressRangesSummary)")
+        return choice
+    }
+
+    /// After QEMU answered: what the debugger wrote into the cache. Logged
+    /// only: whether Linux starts is still decided by probeBootStall.
+    private func logJITPreparation() {
+        guard RuntimeController.edition == "jit", IDPlatform.needsTXMJITProtocol else { return }
+        var start: UInt64 = 0
+        var end: UInt64 = 0
+        guard IDPlatform.jitRegionStart(&start, end: &end) else {
+            DiagLog.write("jit memory: no executable region of 64 MiB or more")
+            return
+        }
+        let (from, to) = (start, end)
+        // Not on the main thread: a vCPU that runs code the debugger did not
+        // prepare never gets past its first instruction (build 40), and
+        // whether reading such a page returns is not known. The first line
+        // without the second in the log means it did not.
+        DispatchQueue.global(qos: .utility).async {
+            DiagLog.write("jit memory: reading the first byte of each page")
+            let m = IDPlatform.jitPageMarks(from: from, to: to).map(\.intValue)
+            guard m.count == 4 else { return }
+            let marks = JITCachePlan.PageMarks(pages: m[0], marked: m[1], zero: m[2], firstZeroMb: m[3])
+            DiagLog.write("jit memory: \(marks.text)"
+                          + (marks.unprepared ? "; the debugger did not prepare all of it" : "")
+                          + (to > JITCachePlan.debuggerAddressLimit
+                              ? "; it reaches 64 GiB or above, where StikDebug's page writes cannot go" : ""))
         }
     }
 
@@ -632,13 +727,20 @@ final class RuntimeController: ObservableObject {
         // On device a start froze here with nothing more in the log (build
         // 41). If QEMU has not answered after 12 s, record where every
         // thread is, from a queue that does not need the main thread.
+        let engineStart = self.engineStart
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 12) { [weak qmp] in
             guard let qmp, !qmp.isReady else { return }
+            // iDeck runs, so the debugger has let it go: QEMU has its options.
+            SessionMarker.update(stage: .silent)
+            engineStart.fire()
             DiagLog.write("boot: QEMU has not answered after 12 s; threads:\n  " + IDPlatform.threadStackSummary())
         }
         try await qmp.connect(path: Paths.qmpSocket.path)
+        SessionMarker.update(stage: .qemu)
+        engineStart.fire()
         DiagLog.write("QMP ready (QEMU main loop running)")
         DiagLog.write("jit memory: executable \(IDPlatform.jitRegionSummary); \(IDPlatform.addressSpaceSummary)")
+        logJITPreparation()
 
         let agent = AgentClient()
         agent.onEvent = { [weak self] event, data in
@@ -692,9 +794,11 @@ final class RuntimeController: ObservableObject {
 
     // MARK: Events
 
-    /// Logs QEMU's disk counters (flushes above all, see BlockStats) at
-    /// these times after Linux is up, as long as the same QEMU still runs.
-    private func logDiskStats(after seconds: [Int]) {
+    /// Logs QEMU's disk counters (flushes above all, see BlockStats) and its
+    /// translation counters at these times after Linux is up, as long as the
+    /// same QEMU still runs. "TB flush count" is how often the TCG cache
+    /// filled up and all translated code was thrown away.
+    private func logRunStats(after seconds: [Int]) {
         Task { [weak self] in
             var waited = 0
             for s in seconds {
@@ -703,6 +807,9 @@ final class RuntimeController: ObservableObject {
                 guard let self, let qmp = self.qmp, case .running = self.phase,
                       let reply = try? await qmp.execute("query-blockstats") else { return }
                 DiagLog.write("disks after \(s / 60) min: \(BlockStats.summary(BlockStats.parse(reply)))")
+                if let jit = try? await qmp.execute("human-monitor-command", ["command-line": "info jit"]) as? String {
+                    DiagLog.write("jit after \(s / 60) min: \(BootProbeParsing.jitSummary(jit))")
+                }
             }
         }
     }
@@ -712,10 +819,18 @@ final class RuntimeController: ObservableObject {
         case "ready":
             DiagLog.write("guest agent ready after \(Int(Date().timeIntervalSince(bootStartedAt ?? Date())))s: kernel \(data["kernel"] as? String ?? "?")"
                           + ", page-table isolation: \((data["kpti"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "no kernel message (agent before runtime 0.1.9, or not forced)")")
+            engineStart.arm(false)
             EngineGuard.clear(Paths.nativeFPMarker)
+            SessionMarker.update(stage: .linux)
+            if engineInUse, !engineProven {
+                engineProven = true
+                EngineGuard.noteProven(Paths.engineProven, stamp: engineStamp)
+                DiagLog.write("engine: Linux came up with the engine options for the first time on this build")
+            }
+            if let mb = plan?.tbCacheMb, mb > JITCachePlan.provenMb { DiagLog.write("jit cache: \(mb) MiB runs") }
             DiagLog.write("address space with Linux running: \(IDPlatform.addressSpaceSummary)")
             DiagLog.write(IDPlatform.raiseVCPUThreadQoS())
-            logDiskStats(after: [180, 600])
+            logRunStats(after: [180, 600, 1800, 3600])
             guestInfo = data
             if let p = data["provision"] as? [String: Any] { provision = p }
             phase = .running
@@ -872,10 +987,10 @@ final class RuntimeController: ObservableObject {
     /// floating-point instruction pattern and compares with the results
     /// recorded on real hardware when the runtime was built (agent
     /// `fpcheck.run`, runtime 0.1.13+). The outcome goes to the log and to
-    /// Settings; a difference with native floating point on is a warning.
+    /// Settings; a difference with native floating point on switches that
+    /// option off for the next start.
     private func runEngineCheckOnce() async {
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        let stamp = "\(bootRuntimeVersion)|\(build)|\(nativeFPInUse)|"
+        let stamp = "\(bootRuntimeVersion)|\(RuntimeController.appBuild)|\(nativeFPInUse)|"
         if let done = UserDefaults.standard.string(forKey: RuntimeController.engineCheckKey), done.hasPrefix(stamp) {
             engineCheck = String(done.dropFirst(stamp.count))
             return
@@ -891,8 +1006,15 @@ final class RuntimeController: ObservableObject {
         let seconds = (reply["seconds"] as? NSNumber)?.doubleValue ?? 0
         DiagLog.write("engine: floating-point check, \(summary.text) (\(String(format: "%.1f", seconds)) s)")
         engineCheck = summary.text
-        if !summary.ok && nativeFPInUse {
-            warnings.append("Floating-point check: \(summary.text). Switch off Native floating point in Settings \u{203A} Advanced.")
+        if nativeFPInUse, EngineGuard.checkFoundDifference(reply) {
+            var changed = Settings.load()
+            changed.nativeFloatingPoint = false
+            changed.save()
+            NotificationCenter.default.post(name: Settings.changedOnDisk, object: nil)
+            EngineGuard.clear(Paths.engineProven)
+            DiagLog.write("engine: native floating point switched off, the check found differences")
+            warnings.append("Floating-point check: \(summary.text). Native floating point was switched off; "
+                            + "close iDeck and open it again to run without it.")
         }
         UserDefaults.standard.set(stamp + summary.text, forKey: RuntimeController.engineCheckKey)
     }

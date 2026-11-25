@@ -104,10 +104,10 @@ struct SettingsView: View {
                     if let check = model.runtime.engineCheck {
                         LabeledContent("Floating-point check", value: check)
                     }
-                    Text("Off by default: checked on an ARM64 test machine, not yet on an iPad. Linux's floating-point and vector math runs directly on this device's processor instead of being emulated in software. iDeck turns it off by itself if Linux fails to start twice in a row.")
+                    Text("Linux's floating-point and vector math runs directly on this device's processor instead of being emulated in software. Checked on an ARM64 test machine; on a device iDeck turns it off by itself if Linux does not come up with it, or if the floating-point check finds a difference.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                     Toggle("Fast process switching (experimental)", isOn: $model.settings.fastProcessSwitch)
-                    Text("Off by default, for the same reason. When Linux switches from one program to another, iDeck keeps the address translations of Linux's own kernel instead of rebuilding all of them each time.")
+                    Text("When Linux switches from one program to another, iDeck keeps the address translations of Linux's own kernel instead of rebuilding all of them each time. Switched off together with native floating point if Linux does not come up.")
                         .font(.caption).foregroundStyle(Theme.textTertiary)
                     Toggle("Linux memory in a file", isOn: $model.settings.ramInFile)
                     Text("On by default. Keeps Linux's RAM in a file so \(Device.os) can write it out instead of terminating iDeck when memory runs low. Turn off only to compare.")

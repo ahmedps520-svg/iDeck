@@ -1,14 +1,22 @@
 import Foundation
 
 /// iDeck's engine options (QEMU "x-host-vfp" and "x-asid-keep-global", the
-/// patches in engine/qemu) are on by default, checked in CI on an ARM64 host
-/// but not on every iPad. If Linux was started with any of them twice in a
-/// row and never reached the guest agent, the next start runs without them
-/// and the settings are switched off.
+/// patches in engine/qemu) are checked in CI on an ARM64 host. On a device
+/// they are tried, and switched off again when Linux does not come up with
+/// them: after one such start until Linux has come up with them once on
+/// this build and runtime, after two in a row from then on.
+///
+/// A start counts from the moment QEMU runs with the options: when it
+/// answers, or when it is still silent after the wait in connectChannels.
+/// A start the debugger stops while it prepares JIT memory does not count.
+/// QEMU reads the options only after that step, so they cannot have played
+/// a part (device, build 41: two starts stopped there, and the options
+/// were switched off for it).
 enum EngineGuard {
-    /// Consecutive unfinished starts after which the setting is switched off.
-    /// One is not enough: closing iDeck while Linux boots also leaves one.
-    static let maxUnfinishedStarts = 2
+    /// Starts in a row that may fail before the options are switched off.
+    /// Once they have worked, one more is allowed: closing iDeck while
+    /// Linux boots also leaves an unfinished start.
+    static func maxUnfinishedStarts(proven: Bool) -> Int { proven ? 2 : 1 }
 
     struct Decision: Equatable {
         /// The engine options that are switched on may be used.
@@ -20,9 +28,10 @@ enum EngineGuard {
     /// `anySettingOn`: at least one engine option is switched on.
     /// `unfinishedStarts`: starts with engine options since the last one
     /// that reached the guest agent.
-    static func decide(anySettingOn: Bool, supported: Bool, unfinishedStarts: Int) -> Decision {
+    /// `proven`: Linux has come up with these options on this build and runtime.
+    static func decide(anySettingOn: Bool, supported: Bool, unfinishedStarts: Int, proven: Bool) -> Decision {
         guard anySettingOn, supported else { return Decision(useEngine: false, switchSettingsOff: false) }
-        if unfinishedStarts >= maxUnfinishedStarts {
+        if unfinishedStarts >= maxUnfinishedStarts(proven: proven) {
             return Decision(useEngine: false, switchSettingsOff: true)
         }
         return Decision(useEngine: true, switchSettingsOff: false)
@@ -33,7 +42,7 @@ enum EngineGuard {
         return max(0, Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0)
     }
 
-    /// Linux is about to start with engine options.
+    /// QEMU is running with engine options.
     static func noteStart(_ marker: URL) {
         try? String(unfinishedStarts(marker) + 1).write(to: marker, atomically: true, encoding: .utf8)
     }
@@ -42,6 +51,26 @@ enum EngineGuard {
     static func clear(_ marker: URL) {
         try? FileManager.default.removeItem(at: marker)
     }
+
+    // MARK: Proven on this device
+
+    /// What "proven" is recorded for: the app build, the runtime and which
+    /// options were on.
+    static func stamp(build: String, runtime: String, hostVfp: Bool, keepGlobal: Bool) -> String {
+        "\(build)|\(runtime)|\(hostVfp ? 1 : 0)\(keepGlobal ? 1 : 0)"
+    }
+
+    static func isProven(_ file: URL, stamp: String) -> Bool {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines) == stamp
+    }
+
+    /// Linux reached the guest agent with these options.
+    static func noteProven(_ file: URL, stamp: String) {
+        try? stamp.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: Floating-point check
 
     /// One line for the log and Settings from the agent's `fpcheck.run`
     /// reply: Linux ran every floating-point instruction pattern and
@@ -67,5 +96,40 @@ enum EngineGuard {
         if let n = (r["sigill"] as? NSNumber)?.intValue, n > 0 { parts.append("\(n) patterns were illegal instructions") }
         if let n = (r["missing"] as? NSNumber)?.intValue, n > 0 { parts.append("\(n) patterns did not run") }
         return ("\(mode): " + (parts.isEmpty ? "the check did not match" : parts.joined(separator: "; ")), false)
+    }
+
+    /// The check compared with hardware results and found a difference: with
+    /// native floating point on, that option gives wrong results here. (A
+    /// runtime without reference results says nothing either way.)
+    static func checkFoundDifference(_ r: [String: Any]) -> Bool {
+        (r["reference"] as? Bool) == true && (r["match"] as? Bool) != true
+    }
+}
+
+/// Counts a start with engine options once, from whichever of two places
+/// sees first that QEMU runs with them: the main actor when QEMU answers,
+/// or a background queue when it is still silent after 12 s.
+final class EngineStartNote: @unchecked Sendable {
+    private let lock = NSLock()
+    private var armed = false
+    private let marker: URL
+
+    init(marker: URL) {
+        self.marker = marker
+    }
+
+    /// `on`: this start runs with engine options and has not been counted.
+    func arm(_ on: Bool) {
+        lock.lock()
+        armed = on
+        lock.unlock()
+    }
+
+    func fire() {
+        lock.lock()
+        let count = armed
+        armed = false
+        lock.unlock()
+        if count { EngineGuard.noteStart(marker) }
     }
 }

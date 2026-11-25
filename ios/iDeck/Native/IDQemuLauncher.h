@@ -17,6 +17,11 @@ typedef void (^IDQemuExitHandler)(int status, NSString *_Nullable message);
 /// YES while the QEMU thread is running.
 @property (nonatomic, readonly) BOOL running;
 
+/// Loads QEMU and the libraries it links without starting it, so that the
+/// address space looks the way QEMU will find it (JITCachePlan measures
+/// where the TCG cache would be mapped).
++ (void)preloadFrameworkAtPath:(NSString *)frameworkPath;
+
 - (instancetype)init NS_UNAVAILABLE;
 /// `frameworkPath` is the bundle's qemu-aarch64-softmmu.framework.
 - (instancetype)initWithFrameworkPath:(NSString *)frameworkPath NS_DESIGNATED_INITIALIZER;

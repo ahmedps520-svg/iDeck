@@ -81,15 +81,11 @@ struct MemoryInputs: Codable {
     var ramFile: Bool
     var tbCacheMaxMb: UInt64
 
-    /// Largest TCG cache for the JIT edition on iPadOS 26 and later. There
-    /// StikDebug makes QEMU's cache executable by writing one byte to each
-    /// 16 KiB page over the debug connection (legacy.js, brk #0x69). With a
-    /// 1 GiB cache Linux never started on an M5 iPad (build 40, engine
-    /// options off: one block translated, vCPU 0 spinning on the first guest
-    /// instruction for minutes); 384 MiB ran (build 31). StikDebug 3.2.2
-    /// encodes page addresses with 36 bits and 1 GiB is 65,536 pages; the
-    /// "jit memory" log line shows where the cache landed.
-    static let preparedJITCacheMaxMb: UInt64 = 384
+    /// Largest TCG cache for the JIT edition on iPadOS 26 and later, where
+    /// the debugger has to prepare the cache page by page: the size that is
+    /// known to run. A start raises it when the measurements allow
+    /// (JITCachePlan, RuntimeController.chooseJITCache).
+    static let preparedJITCacheMaxMb: UInt64 = JITCachePlan.provenMb
 
     /// This device and app right now: the per-app limit iOS enforces is what
     /// os_proc_available_memory() reports plus the current footprint. Used by
