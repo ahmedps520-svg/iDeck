@@ -641,6 +641,30 @@ engine options.**
 - The IPA of build 46 was checked: version 0.1.46, the patched QEMU with both
   engine options, and the new log lines in the app binary.
 
+**Build 42 logs, pulled 2026-11-25** (kept locally as `Logs-build42`):
+- **A third start stopped the same way, with both engine options off** (pid
+  1992, 11:19:06Z): the last line comes 14 ms after `connecting QMP`. This is
+  the device evidence for the section above.
+- The whole process was stopped, not only its main thread: build 42's 12 s
+  check runs on a background queue and wrote nothing in the 114 s before the
+  relaunch.
+- The next start (pid 2009) ran; the debugger held iDeck for 1.26 s while it
+  prepared 384 MiB, and the footprint rose from 29 to 423 MiB.
+- Recorded starts with a 384 MiB cache: 3 stopped (pids 1901, 1908, 1992), 2
+  ran (1912, 2009). With 1 GiB (builds 38, 40) both recorded starts got
+  through preparation, in 2.9 s. Too few to say that size matters.
+- StikDebug 3.2.2 returns to the app first, then attaches, continues and waits
+  for the `brk` (`RunJSView.swift`, `legacy.js`), so it writes the pages from
+  the background. Where it stopped is only in StikDebug's own script log,
+  which has not been looked at after a stopped start.
+- Steam on the device, options off: the guest CPU was busy (24 to 96%)
+  until about 70 s after Linux came up and was at 3 to 19% afterwards, the
+  same order as the 66.6 s to the sign-in window in CI. With Teeworlds
+  running it was 23 to 51%.
+
+**Build 46 was installed with iloader on 2026-11-25** ("Operation completed").
+It has not been started yet.
+
 ### iOS app builds (`ios.yml`)
 
 | Attempt | Result | Fix |
